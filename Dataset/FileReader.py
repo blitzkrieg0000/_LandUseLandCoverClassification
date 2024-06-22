@@ -24,6 +24,7 @@ class ReadGeoTIFF():
         if self.file_reader:
             self.file_reader.close()
     
+    
     def OpenFile(self):
         self.file_reader = rasterio.open(self.filepath)
         self.__band_count = self.file_reader.count

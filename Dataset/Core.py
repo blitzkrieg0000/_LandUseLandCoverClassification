@@ -1,5 +1,6 @@
 import torch
-from Const import DATA_PATH, MASK_PATH
+from Const import DATA_PATH, DATASET_FOR_MODEL, MASK_PATH
+from Dataset.Enum import DatasetType
 from FileReader import ReadGeoTIFF
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader, Dataset
@@ -33,8 +34,18 @@ class SentinelPatchDataset(Dataset):
     def __getitem__(self, idx:int):
         buffer, window = self.data_readers[idx%len(self.data_readers)].ReadRandomPatch(self.patch_size)
         mask, window = self.mask_readers[0 if len(self.mask_readers)==1 else idx%len(self.data_readers)].ReadRandomPatch(self.patch_size, window=window)
-        
         return buffer, mask
+
+
+
+class RemoteSensingDatasetManager():
+    def __init__(self): 
+        ...
+
+    def GetDataloader(self, dataset_type: DatasetType) -> Dataset:
+        DATASET_FOR_MODEL[dataset_type](DATA_PATH, MASK_PATH, patch_size=64)
+        dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
+        return dataloader
 
 
 

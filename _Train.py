@@ -10,6 +10,7 @@ from Model.Unet3D import UNet3D
 from Model.Core import ModelManager, ModelType
 from Tool import ChangeMaskOrder
 
+
 # =================================================================================================================== #
 #! PARAMS
 # =================================================================================================================== #
@@ -36,6 +37,7 @@ def ReadWandbKeyFromFile() -> str:
     with open("./data/asset/config/wandb/.apikey", "r") as f:
         return f.read()
 
+
 def InitializeWandb():
     """ Weights & Biases """
     wandb_key = ReadWandbKeyFromFile()
@@ -54,8 +56,6 @@ def InitializeWandb():
         tags=["Cukurova_IO_LULC", "CustomUnet", "Train"],
     )
 # InitializeWandb()
-
-
 
 
 
