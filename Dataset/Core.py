@@ -25,8 +25,7 @@ class RemoteSensingDatasetManager():
 
 
 if "__main__" == __name__:
-	dataset = RemoteSensingDatasetManager().GetDataloader(DatasetType.Cukurova_IO_LULC)
-	dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
+	dataloader = RemoteSensingDatasetManager().GetDataloader(DatasetType.Cukurova_IO_LULC)
 	buffer, mask = next(iter(dataloader))
 	# Show Patches
 	fig, axs = plt.subplots(4, 4, figsize=(12, 12))
