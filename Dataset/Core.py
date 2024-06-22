@@ -2,8 +2,8 @@ import torch
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader, Dataset
 
-from Dataset.Const import DATA_PATH, MASK_PATH
-from Dataset.GeoTIFFReader import ReadGeoTIFF
+from Const import DATA_PATH, MASK_PATH
+from FileReader import ReadGeoTIFF
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

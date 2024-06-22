@@ -7,6 +7,9 @@ import torch
 
 
 class ReadGeoTIFF():
+    """
+        GeoTIF/TIF/TIFF okuma işlemlerini gerçekleştirir.
+    """
     def __init__(self, filepath, cache=True):
         self.filepath = filepath
         self.file_reader = None
