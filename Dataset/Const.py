@@ -5,7 +5,7 @@ from Model.Unet import CustomUnet
 from Model.Unet3D import UNet3D
 
 
-DATASET_FOR_MODEL = {
+DATASET = {
     DatasetType.Cukurova_IO_LULC: SentinelPatchDataset,
     # DatasetType.Cukurova_IO_LULC_3D: Sentinel3DPatchDataset
     

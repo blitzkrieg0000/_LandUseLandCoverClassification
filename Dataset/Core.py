@@ -1,5 +1,5 @@
 import torch
-from Const import DATASET_CONFIG, DATASET_FOR_MODEL
+from Const import DATASET_CONFIG, DATASET
 from FileReader import ReadGeoTIFF
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader, Dataset
@@ -57,7 +57,7 @@ class RemoteSensingDatasetManager():
         ...
 
     def GetDataloader(self, dataset_type: DatasetType, **override_dataset_config) -> DataLoader:
-        dataset = DATASET_FOR_MODEL[dataset_type]
+        dataset = DATASET[dataset_type]
         config = DATASET_CONFIG[dataset]
         config.update(override_dataset_config)
         dataset(config["DATA"], config["MASK"], patch_size=config["PATCH_SIZE"])
