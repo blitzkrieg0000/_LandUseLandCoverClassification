@@ -1,9 +1,11 @@
 import torch
-from Const import DATA_PATH, DATASET_FOR_MODEL, MASK_PATH
-from Dataset.Enum import DatasetType
+from Const import DATASET_CONFIG, DATASET_FOR_MODEL
 from FileReader import ReadGeoTIFF
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader, Dataset
+
+from Dataset.Enum import DatasetType
+from Tool import ChangeMaskOrder
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -16,6 +18,8 @@ class SentinelPatchDataset(Dataset):
         self.patch_size = patch_size
         self.data_readers:list[ReadGeoTIFF] = []
         self.mask_readers:list[ReadGeoTIFF] = []
+        self.__classes = torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11])
+        self.__number_of_classes = len(self.__classes)
         self.__CreateReaders()
 
 
@@ -25,16 +29,26 @@ class SentinelPatchDataset(Dataset):
 
         for pth in self.mask_paths:
             self.mask_readers+=[ReadGeoTIFF(pth, cache=True)]
-            
+
+    def Target2OneHot(self, targets):
+        targets = ChangeMaskOrder(targets, self.__classes)
+
+        #! Mask To One Hot
+        targets = targets.long() # Maskeyi long yap
+
+        # One-hot kodlamalı tensor oluştur
+        one_hot_mask = torch.zeros((targets.size(0), self.__number_of_classes, targets.size(2), targets.size(3)), device=DEVICE)
+
+        # Sınıf indekslerini one-hot kodlamalı tensor haline getir
+        return one_hot_mask.scatter_(1, targets, 1)
 
     def __len__(self):
         return len(self.mask_paths)*16
 
-
     def __getitem__(self, idx:int):
         buffer, window = self.data_readers[idx%len(self.data_readers)].ReadRandomPatch(self.patch_size)
         mask, window = self.mask_readers[0 if len(self.mask_readers)==1 else idx%len(self.data_readers)].ReadRandomPatch(self.patch_size, window=window)
-        return buffer, mask
+        return buffer, self.Target2OneHot(mask)
 
 
 
@@ -42,9 +56,12 @@ class RemoteSensingDatasetManager():
     def __init__(self): 
         ...
 
-    def GetDataloader(self, dataset_type: DatasetType) -> Dataset:
-        DATASET_FOR_MODEL[dataset_type](DATA_PATH, MASK_PATH, patch_size=64)
-        dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
+    def GetDataloader(self, dataset_type: DatasetType, **override_dataset_config) -> DataLoader:
+        dataset = DATASET_FOR_MODEL[dataset_type]
+        config = DATASET_CONFIG[dataset]
+        config.update(override_dataset_config)
+        dataset(config["DATA"], config["MASK"], patch_size=config["PATCH_SIZE"])
+        dataloader = DataLoader(dataset, batch_size=config["BATCH_SIZE"], shuffle=config["SHUFFLE"])
         return dataloader
 
 

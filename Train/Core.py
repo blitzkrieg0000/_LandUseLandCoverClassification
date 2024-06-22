@@ -1,75 +1,71 @@
 import torch
+import wandb
 
 from Dataset.Core import RemoteSensingDatasetManager
+from Dataset.DataProcess import TRANSFORM_IMAGE
 from Dataset.Enum import DatasetType
 from Model.Core import ModelManager
 from Model.Enum import ModelType
 from Tool import ChangeMaskOrder
+from Train.Config import TRAIN_DEFAULTS
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 
 class TrainManager():
     def __init__(self, model_type:ModelType=ModelType.UNET_2D) -> None:
         self._ModelType=model_type
-        self.TrainParameters = {}
+        self.ModelSavePath = "./weight/test.pth"
 
     def InitializeTrainParameters(self, **params):
         self.TrainParameters = params
     
-    def Preprocess(self):
-        ...
+    def PreprocessInput(self, inputs):
+        return TRANSFORM_IMAGE(inputs)
+
+    def SaveModel(self, MODEL):
+        torch.save(MODEL.state_dict(), self.ModelSavePath)
+        # wandb.save(".data/wandb/weight/custom02_unet.pth")
 
     def Train(self, dataset_type:DatasetType=DatasetType.Cukurova_IO_LULC, verbose=True):
         ##! --------------- Model --------------- !##
         MODEL, criterion, optimizer = ModelManager().Create(self._ModelType)
-        if verbose:
-            print(MODEL)
+        self.TrainParameters = TRAIN_DEFAULTS[self._ModelType]
+        if verbose: print(MODEL)
         
         ##! --------------- Dataset --------------- !##
         DATALOADER = RemoteSensingDatasetManager().GetDataloader(dataset_type)
-        
         
         ##! --------------- Params --------------- !##
         classes = torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11])
         EPOCH = self.TrainParameters.get("EPOCH", 1000)
         BATCH_SIZE = self.TrainParameters.get("BATCH_SIZE", 16)
-        num_classes = len(classes)
+        PATCH_SIZE = self.TrainParameters.get("PATCH_SIZE", 64)
+
         for epoch in range(EPOCH):
             totalAccuracy = 0
             for inputs, targets in DATALOADER:
                 inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 
-                targets = ChangeMaskOrder(targets, classes)
-
-                #! Mask To One Hot
-                targets = targets.long() # Maskeyi uzun tamsayı yap
-
-                # One-hot kodlamalı tensor oluştur
-                one_hot_mask = torch.zeros((targets.size(0), num_classes, targets.size(2), targets.size(3)), device=DEVICE)
-
-                # Sınıf indekslerini one-hot kodlamalı tensor haline getir
-                one_hot_mask.scatter_(1, targets, 1)
 
                 optimizer.zero_grad()
                 
                 #TODO inputs = inputs[:, 0:10, :, :]     #! Unet3D
                 #TODO inputs = inputs.unsqueeze(1) #! Unet3D
                 
-                inputs = TRANSFORM_IMAGE(inputs)
+                inputs = self.PreprocessInput(inputs)
                 outputs = MODEL(inputs)
                 
                 #TODO one_hot_mask = one_hot_mask.unsqueeze(1) #! Unet3D
 
-                loss = criterion(outputs, one_hot_mask)
+                loss = criterion(outputs, targets)
                 loss.backward()
                 optimizer.step()
 
                 # Accuracy
                 class_indices = torch.argmax(outputs, dim=1)  #TODO Unet3D dim2
                 class_indices = class_indices.squeeze(1)
-                accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / patch_size**2 /inputs.size(0))
+                accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / PATCH_SIZE**2 /inputs.size(0))
                 totalAccuracy += accuracy.item()
                 print(f"Epoch {epoch+1}/{EPOCH}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy.item()}")
                 try:
@@ -84,6 +80,5 @@ class TrainManager():
             # print(f"Epoch {epoch+1}/{EPOCH}, Epoch Accuracy: {totalAccuracy}")
 
 
-        torch.save(MODEL.state_dict(), "./weight/custom02_unet.pth")
-        # wandb.save(".data/wandb/weight/custom02_unet.pth")
-        # wandb.finish()
+        wandb.finish()
+
