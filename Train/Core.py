@@ -7,7 +7,7 @@ from Dataset.Enum import DatasetType
 from Model.Core import ModelManager
 from Model.Enum import ModelType
 from Tool import ChangeMaskOrder
-from Train.Config import TRAIN_DEFAULTS
+from Train.Const import TRAIN_DEFAULTS
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

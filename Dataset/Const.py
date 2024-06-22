@@ -1,4 +1,4 @@
-from Dataset.Core import SentinelPatchDataset
+from Dataset.Dataset import SentinelPatchDataset
 from Dataset.Enum import DatasetType
 from Model.Resnet50 import CustomResNet50
 from Model.Unet import CustomUnet
@@ -6,9 +6,7 @@ from Model.Unet3D import UNet3D
 
 
 DATASET = {
-    DatasetType.Cukurova_IO_LULC: SentinelPatchDataset,
-    # DatasetType.Cukurova_IO_LULC_3D: Sentinel3DPatchDataset
-    
+    DatasetType.Cukurova_IO_LULC: SentinelPatchDataset
 }
 
 DATASET_CONFIG = {
