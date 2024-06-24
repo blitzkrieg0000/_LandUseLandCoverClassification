@@ -23,7 +23,8 @@ class SentinelPatchDataset(Dataset):
 
 
 	def __OverrideModelConfig(self):
-		self.patch_size = self.ModelMeta.PatchSize
+		if self.ModelMeta is not None:
+			self.patch_size = self.ModelMeta.PatchSize
 
 
 	def __CreateReaders(self):
@@ -32,7 +33,6 @@ class SentinelPatchDataset(Dataset):
 
 		for pth in self.mask_paths:
 			self.mask_readers+=[ReadGeoTIFF(pth, cache=True)]
-
 
 
 	def __len__(self):

@@ -2,7 +2,7 @@ import torch
 import wandb
 
 from Dataset.Core import RemoteSensingDatasetManager
-from Dataset.DataProcess import TRANSFORM_IMAGE
+from Dataset.DataProcess import DATA_TRANSFORMS_BY_MODEL, TRANSFORM_IMAGE
 from Dataset.Enum import DatasetType
 from Model.Core import ModelManager
 from Model.Enum import ModelType
@@ -10,22 +10,6 @@ from Tool import ChangeMaskOrder
 from Train.Const import TRAIN_DEFAULTS
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-def Target2OneHot(self, targets):
-    targets = ChangeMaskOrder(targets, self.__classes)
-
-    self.ModelMeta.OutputShape
-    #! Mask To One Hot
-    targets = targets.long() # Maskeyi long yap
-
-    # One-hot kodlamalı tensor oluştur
-    one_hot_mask = torch.zeros(self.ModelMeta.OutputShape, device=DEVICE)  # (targets.size(0), self.__number_of_classes, targets.size(2), targets.size(3))
-
-    # Sınıf indekslerini one-hot kodlamalı tensor haline getir
-    return one_hot_mask.scatter_(1, targets, 1)
-
-
 
 
 
@@ -72,13 +56,18 @@ class WandbLogger():
 
 class TrainManager():
     def __init__(self, model_type:ModelType=ModelType.UNET_2D) -> None:
-        self.__WBLogger = WandbLogger()
-        self.__InitializeWandb()
+        self.__WBLogger = None
         self.__WBSavePath = ".data/wandb/weight/custom02_unet.pth"
         self.ModelSavePath = "./weight/test.pth"
         self._ModelType=model_type
+        self.__InitializeWandb()
+    
+    def __del__(self):
+        self.__WBLogger.Teardown()
+
 
     def __InitializeWandb(self):
+        self.__WBLogger = WandbLogger()
         self.__WBLogger.InitializeWandb(
             "LULC_Project01",
             "burakhansamli0-0-0-0",
@@ -93,8 +82,12 @@ class TrainManager():
     
 
     def PreprocessInput(self, inputs):
-        return TRANSFORM_IMAGE(inputs)
+        _transform = DATA_TRANSFORMS_BY_MODEL[self._ModelType]["input_transform"]
+        return _transform(inputs)
 
+    def PreprocessTarget(self, targets):
+        _transform = DATA_TRANSFORMS_BY_MODEL[self._ModelType]["target_transform"]
+        return _transform(targets)
 
     def SaveModel(self, MODEL):
         torch.save(MODEL.state_dict(), self.ModelSavePath)
@@ -107,14 +100,11 @@ class TrainManager():
         return accuracy.item()
 
 
-    def Train(self, dataset_type:DatasetType=DatasetType.Cukurova_IO_LULC, verbose=True):
+    def Train(self, dataloader, verbose=True):
         ##! --------------- Model --------------- !##
         MODEL, criterion, optimizer = ModelManager().Create(self._ModelType)
         self.TrainParameters = TRAIN_DEFAULTS[self._ModelType]
         if verbose: print(MODEL)
-        
-        ##! --------------- Dataset --------------- !##
-        DATALOADER = RemoteSensingDatasetManager().GetDataloader(dataset_type)
         
         ##! --------------- Params --------------- !##
         EPOCH = self.TrainParameters.get("EPOCH", 1000)
@@ -124,28 +114,32 @@ class TrainManager():
         totalStep=0
         for epoch in range(EPOCH):
             totalAccuracy = 0
-            for inputs, targets in DATALOADER:
+            for inputs, targets in dataloader:
                 inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
                 
+                ##! --------------- Zeroing Optimizer's Gradient --------------- !##
                 optimizer.zero_grad()
                 
-                #TODO inputs = inputs[:, 0:10, :, :]     #! Unet3D
-                #TODO inputs = inputs.unsqueeze(1) #! Unet3D
-                
+                ##! --------------- Preprocess --------------- !##
                 inputs = self.PreprocessInput(inputs)
+                targets = self.PreprocessTarget(targets)
+
+                ##! --------------- Forward --------------- !##
                 outputs = MODEL(inputs)
                 
-                #TODO one_hot_mask = one_hot_mask.unsqueeze(1) #! Unet3D
-
+                ##! --------------- Loss --------------- !##
                 loss = criterion(outputs, targets)
+
+                ##! --------------- Backward --------------- !##
                 loss.backward()
                 optimizer.step()
 
-                # Accuracy
+                ##! --------------- Metrics --------------- !##
                 accuracy = self.CalculateAccuracy(outputs, targets, BATCH_SIZE, PATCH_SIZE)
                 totalAccuracy += accuracy
                 totalStep += 1
 
+                ###! --------------- Log --------------- !##
                 if verbose: 
                     print(f"Epoch {epoch+1}/{EPOCH}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy}")
 
@@ -155,7 +149,8 @@ class TrainManager():
                     "train_accuracy": accuracy
                 })
 
+
         print(f"Epoch {epoch+1}/{EPOCH}, Average Accuracy: {totalAccuracy/totalStep}")
         self.__WBLogger.Save(self.__WBSavePath)
-        self.__WBLogger.Teardown()
+
 

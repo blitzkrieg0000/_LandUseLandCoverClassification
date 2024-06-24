@@ -111,6 +111,7 @@ if "__main__" == __name__:
 
             # Sınıf indekslerini one-hot kodlamalı tensor haline getir
             one_hot_mask.scatter_(1, targets, 1)
+            one_hot_mask = one_hot_mask.unsqueeze(1) #! Unet3D
 
             optimizer.zero_grad()
             
@@ -120,7 +121,6 @@ if "__main__" == __name__:
             inputs = TRANSFORM_IMAGE(inputs)
             outputs = MODEL(inputs)
             
-            one_hot_mask = one_hot_mask.unsqueeze(1) #! Unet3D
 
             loss = criterion(outputs, one_hot_mask)
             loss.backward()
@@ -147,7 +147,6 @@ if "__main__" == __name__:
     torch.save(MODEL.state_dict(), "./weight/custom02_unet.pth")
     # wandb.save(".data/wandb/weight/custom02_unet.pth")
     # wandb.finish()
-
 
 
 
