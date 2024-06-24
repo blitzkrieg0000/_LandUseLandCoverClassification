@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchinfo import summary
 
-from Model.Base import ModelMeta
+from Model.Base import BaseModel, ModelMeta
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -15,7 +15,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #! B1-B9-B10           => 60m
 # LULC için toplam 10 Band
 
-class UNet3D(nn.Module):
+class UNet3D(BaseModel):
     def __init__(self, num_input_channel=1, num_classes=9, patch_size=64):
         super(UNet3D, self).__init__()
         
@@ -104,6 +104,11 @@ class UNet3D(nn.Module):
         x = F.interpolate(x, size=(self.__ModelMeta.NumClasses, self.__ModelMeta.PatchSize, self.__ModelMeta.PatchSize), mode="trilinear", align_corners=True)
         x = self.final_conv(x) # => [1, 1, 9, 64, 64]
         return x
+    
+    
+    def CompileModel(self):
+        return super().CompileModel(self)
+
 
     def Metadata(self):
         self.__ModelMeta.InputShape = (self.__ModelMeta.NumInputChannel, self.__ModelMeta.InputDepth, self.__ModelMeta.InputHeight, self.__ModelMeta.InputWidth)

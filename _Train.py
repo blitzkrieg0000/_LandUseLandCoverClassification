@@ -2,14 +2,13 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
-from Model.Resnet50 import CustomResNet50
-from Model.Unet import CustomUnet
+from DataProcess.Dataset import TRANSFORM_IMAGE, SentinelPatchDataset
+from model.Resnet50 import CustomResNet50
+from model.Unet import CustomUnet
 import wandb
 
-from Model.Unet3D import UNet3D
-from Model.Core import ModelManager, ModelType
-from Tool import ChangeMaskOrder
-
+from model.Unet3D import UNet3D
+from model.Core import ModelGenerator, ModelType
 
 # =================================================================================================================== #
 #! PARAMS
@@ -37,7 +36,6 @@ def ReadWandbKeyFromFile() -> str:
     with open("./data/asset/config/wandb/.apikey", "r") as f:
         return f.read()
 
-
 def InitializeWandb():
     """ Weights & Biases """
     wandb_key = ReadWandbKeyFromFile()
@@ -58,6 +56,16 @@ def InitializeWandb():
 # InitializeWandb()
 
 
+# =================================================================================================================== #
+#! Functions
+# =================================================================================================================== #
+def ChangeMaskOrder(mask, classes):
+    mapping = {x:i for i,x in enumerate(classes)}
+    new_mask = mask.clone()
+    for old, new in mapping.items():
+        new_mask[mask == old] = new
+    return new_mask
+
 
 # =================================================================================================================== #
 #! Load Dataset
@@ -72,9 +80,11 @@ dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
 # Create Model
 num_channels = 10  # Multispektral kanal sayısı
 num_classes = 9    # Maskedeki sınıf sayısı
+_ModelGenerator = ModelGenerator()
+MODEL = _ModelGenerator.Create(ModelType.UNET_2D, num_channels=num_channels, num_classes=num_classes)
 
-_ModelManager = ModelManager()
-MODEL, criterion, optimizer = _ModelManager.Create(ModelType.UNET_2D)
+criterion = nn.BCEWithLogitsLoss()
+optimizer = torch.optim.Adam(MODEL.parameters(), lr=LEARNING_RATE)
 
 # Wandb Watch
 # wandb.watch(MODEL, log="all")
@@ -101,23 +111,23 @@ if "__main__" == __name__:
 
             # Sınıf indekslerini one-hot kodlamalı tensor haline getir
             one_hot_mask.scatter_(1, targets, 1)
+            one_hot_mask = one_hot_mask.unsqueeze(1) #! Unet3D
 
             optimizer.zero_grad()
             
-            #TODO inputs = inputs[:, 0:10, :, :]     #! Unet3D
-            #TODO inputs = inputs.unsqueeze(1) #! Unet3D
+            inputs = inputs[:, 0:10, :, :]
+            inputs = inputs.unsqueeze(1) #! Unet3D
             
             inputs = TRANSFORM_IMAGE(inputs)
             outputs = MODEL(inputs)
             
-            #TODO one_hot_mask = one_hot_mask.unsqueeze(1) #! Unet3D
 
             loss = criterion(outputs, one_hot_mask)
             loss.backward()
             optimizer.step()
 
             # Accuracy
-            class_indices = torch.argmax(outputs, dim=1)  #TODO Unet3D dim2
+            class_indices = torch.argmax(outputs, dim=2)  #! Unet3D dim2
             class_indices = class_indices.squeeze(1)
             accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / patch_size**2 /inputs.size(0))
             totalAccuracy += accuracy.item()
@@ -137,7 +147,6 @@ if "__main__" == __name__:
     torch.save(MODEL.state_dict(), "./weight/custom02_unet.pth")
     # wandb.save(".data/wandb/weight/custom02_unet.pth")
     # wandb.finish()
-
 
 
 

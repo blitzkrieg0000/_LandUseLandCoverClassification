@@ -1,4 +1,4 @@
-from Enum import ModelType
+from Model.Enum import ModelType
 
 from Model.Resnet50 import CustomResNet50
 from Model.Unet import CustomUnet
