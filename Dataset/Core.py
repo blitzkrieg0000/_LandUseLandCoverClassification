@@ -2,27 +2,27 @@ import torch
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 
-from Dataset.Const import DATASET, DATASET_CONFIG
+from Dataset.Const import DATASET
+from Dataset.Dataset import DatasetProcessor, SentinelDatasetProcessor
 from Dataset.Enum import DatasetType
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class RemoteSensingDatasetManager():
-	def __init__(self): 
-		...
+	def __init__(self, dataset_processor: DatasetProcessor): 
+		self.DatasetProcessor = dataset_processor
 
-	def GetDataloader(dataset_type: DatasetType, override_dataset_config={}) -> DataLoader:
-		dataset = DATASET[dataset_type]
-		config = DATASET_CONFIG[dataset]
+	def GetDataloader(self, dataset_type: DatasetType, override_dataset_config={}) -> DataLoader:
+		config = DATASET[dataset_type]
 		config.update(override_dataset_config)
-		_dataset = dataset(config["DATA"], config["MASK"], patch_size=config["PATCH_SIZE"])
+		_dataset = self.DatasetProcessor(config["DATA"], config["MASK"], patch_size=config["PATCH_SIZE"])
 		dataloader = DataLoader(_dataset, batch_size=config["BATCH_SIZE"], shuffle=config["SHUFFLE"])
 		return dataloader
 
 
 if "__main__" == __name__:
-	dataloader = RemoteSensingDatasetManager.GetDataloader(DatasetType.Cukurova_IO_LULC)
+	dataloader = RemoteSensingDatasetManager(SentinelDatasetProcessor).GetDataloader(DatasetType.Cukurova_IO_LULC)
 	buffer, mask = next(iter(dataloader))
 
 	# Show Patches

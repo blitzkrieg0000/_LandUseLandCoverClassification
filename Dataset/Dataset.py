@@ -8,16 +8,20 @@ from Tool import ChangeMaskOrder
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class SentinelDatasetProcessor(Dataset):
+class DatasetProcessor(Dataset):
+	def __init__(self):
+		super().__init__()
+
+
+class SentinelDatasetProcessor(DatasetProcessor):
 	def __init__(self, image_paths, mask_paths, patch_size=256, model_meta:ModelMeta=None):
+		super().__init__()
 		self.image_paths = image_paths
 		self.mask_paths = mask_paths
 		self.patch_size = patch_size
 		self.ModelMeta = model_meta
 		self.data_readers:list[ReadGeoTIFF] = []
 		self.mask_readers:list[ReadGeoTIFF] = []
-		self.__classes = torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11])
-		self.__number_of_classes = len(self.__classes)
 		self.__OverrideModelConfig()
 		self.__CreateReaders()
 
