@@ -12,11 +12,81 @@ from Train.Const import TRAIN_DEFAULTS
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def Target2OneHot(self, targets):
+    targets = ChangeMaskOrder(targets, self.__classes)
+
+    self.ModelMeta.OutputShape
+    #! Mask To One Hot
+    targets = targets.long() # Maskeyi long yap
+
+    # One-hot kodlamalı tensor oluştur
+    one_hot_mask = torch.zeros(self.ModelMeta.OutputShape, device=DEVICE)  # (targets.size(0), self.__number_of_classes, targets.size(2), targets.size(3))
+
+    # Sınıf indekslerini one-hot kodlamalı tensor haline getir
+    return one_hot_mask.scatter_(1, targets, 1)
+
+
+
+
+
+class WandbLogger():
+    def __init__(self) -> None:
+        self._APIKeyPath = "./data/asset/config/wandb/.apikey"
+        self.InitializeWandb()
+        self.__instance=None
+
+    def ReadWandbKeyFromFile(self) -> str:
+        with open(self._APIKeyPath, "r") as f:
+            return f.read()
+    
+    def InitializeWandb(self, project, wandb_entity, group="Train_", save_dir="./data/", tags=["Train"], consts={}):
+        """ Weights & Biases """
+        if self.__instance is not None:
+            raise ValueError("Wandb oturumu zaten açıldı.")
+        
+        wandb_key = self.ReadWandbKeyFromFile()
+        wandb.login(key=wandb_key)
+        self.__instance = wandb.init(
+            project=project,       # Wandb Project Name
+            entity=wandb_entity,   # Wandb Entity Name
+            dir=save_dir,
+            config=consts,
+            group=group,
+            tags=tags
+        )
+        return self.__instance
+    
+    def Log(self, verbose=True, **kwargs):
+        try: 
+            self.__instance.log(kwargs)
+        except Exception as e: 
+            if verbose: 
+                print(e)
+
+    def Save(self, path):
+        self.__instance.save(path)
+
+    def Teardown(self):
+        self.__instance.finish()
+
+
 class TrainManager():
     def __init__(self, model_type:ModelType=ModelType.UNET_2D) -> None:
-        self._ModelType=model_type
+        self.__WBLogger = WandbLogger()
+        self.__InitializeWandb()
+        self.__WBSavePath = ".data/wandb/weight/custom02_unet.pth"
         self.ModelSavePath = "./weight/test.pth"
+        self._ModelType=model_type
 
+    def __InitializeWandb(self):
+        self.__WBLogger.InitializeWandb(
+            "LULC_Project01",
+            "burakhansamli0-0-0-0",
+            group="Train_CustomUnet",
+            tags=["Cukurova_IO_LULC", "CustomUnet", "Train"],
+            consts=TRAIN_DEFAULTS
+
+        )
 
     def InitializeTrainParameters(self, **params):
         self.TrainParameters = params
@@ -76,20 +146,16 @@ class TrainManager():
                 totalAccuracy += accuracy
                 totalStep += 1
 
-                if verbose: print(f"Epoch {epoch+1}/{EPOCH}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy}")
+                if verbose: 
+                    print(f"Epoch {epoch+1}/{EPOCH}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy}")
 
-                try:
-                    wandb.log({
-                        "epoch": epoch+1,
-                        "train_loss": loss.item()/BATCH_SIZE,
-                        "train_accuracy": accuracy
-                    })
-                except Exception as e:
-                    if verbose:
-                        print(e)
-                
+                self.__WBLogger.Log({
+                    "epoch": epoch+1,
+                    "train_loss": loss.item()/BATCH_SIZE,
+                    "train_accuracy": accuracy
+                })
+
         print(f"Epoch {epoch+1}/{EPOCH}, Average Accuracy: {totalAccuracy/totalStep}")
-        
-        # wandb.save(".data/wandb/weight/custom02_unet.pth")
-        # wandb.finish()
+        self.__WBLogger.Save(self.__WBSavePath)
+        self.__WBLogger.Teardown()
 

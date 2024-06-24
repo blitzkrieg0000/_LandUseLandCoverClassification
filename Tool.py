@@ -38,7 +38,6 @@ class EarlyStopping():
 
 
 
-
 # =================================================================================================================== #
 #! Functions
 # =================================================================================================================== #
@@ -48,3 +47,8 @@ def ChangeMaskOrder(mask, classes):
     for old, new in mapping.items():
         new_mask[mask == old] = new
     return new_mask
+
+
+def CountModelParameters(model):
+    """ Count Model Parameters """
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)

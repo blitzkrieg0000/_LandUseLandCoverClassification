@@ -12,8 +12,8 @@ DATASET = {
 DATASET_CONFIG = {
     SentinelPatchDataset : {
         # "DATA" : [f"dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2/data/Pansharpen/raster/PanComposite_2023-12-01.tif"],
-        "DATA" : [f"data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2/data/Resample/raster/CompositeBandsDataset02_2023-12-01.tif"],
-        "MASK" : [f"data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2/mask/raster/mask.tif"],
+        "DATA" : [f"./data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2/data/Resample/raster/CompositeBandsDataset02_2023-12-01.tif"],
+        "MASK" : [f"./data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2/mask/raster/mask.tif"],
         "PATCH_SIZE" : 64,
         "BATCH_SIZE" : 16,
         "SHUFFLE" : False

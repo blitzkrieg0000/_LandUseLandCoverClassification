@@ -3,18 +3,30 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision import models
 
+from Model.Base import ModelMeta
+from Tool import CountModelParameters
+
 num_channels = 13
 num_classes = 9
 patch_size = 64
 
-
 class CustomResNet50(nn.Module):
-    def __init__(self, num_channels, num_classes, patch_size):
+    def __init__(self, num_input_channel, num_classes, patch_size):
         super(CustomResNet50, self).__init__()
+        # Metadata
+        self.__ModelMeta = ModelMeta(
+            NumInputChannel=num_input_channel,
+            NumClasses=num_classes,
+            PatchSize=patch_size
+        )
+        
+        # Pretrained ResNet50
         self.resnet50 = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V2)
         for param in self.resnet50.parameters():
             param.requires_grad = True
-        self.resnet50.conv1 = nn.Conv2d(num_channels, 64, kernel_size=(3, 3), bias=False)
+        
+        # Edit Layers
+        self.resnet50.conv1 = nn.Conv2d(self.__ModelMeta.NumInputChannel, 64, kernel_size=(3, 3), bias=False)
         self.resnet50 = nn.Sequential(*list(self.resnet50.children())[:-2])
         self.pooling = nn.AdaptiveAvgPool2d((1, 1))
         # self.resnet50.add_module("final_conv1", nn.Conv2d(2048, 256, kernel_size=3, stride=1, padding=1))  # 1, 256, 4, 4
@@ -22,8 +34,7 @@ class CustomResNet50(nn.Module):
         self.flatten = nn.Flatten()
         self.fc1 = nn.Linear(2048, 512)
         self.fc2 = nn.Linear(512, 256)
-        self.fc3 = nn.Linear(256, num_classes * patch_size * patch_size)
-
+        self.fc3 = nn.Linear(256, num_classes * self.__ModelMeta.PatchSize * self.__ModelMeta.PatchSize)
 
     def forward(self, x):
         x = self.resnet50(x)
@@ -32,12 +43,14 @@ class CustomResNet50(nn.Module):
         x = self.fc1(x)
         x = self.fc2(x)
         x = self.fc3(x)
-        x = x.view(x.size(0), -1, patch_size, patch_size)  # Çıkış boyutunu [BatchSizexClassNumberxPatchSizexPatchSize] yapmak için yeniden şekillendirme
+        x = x.view(x.size(0), -1, self.__ModelMeta.PatchSize, self.__ModelMeta.PatchSize)  # Çıkış boyutunu [BatchSizexClassNumberxPatchSizexPatchSize] yapmak için yeniden şekillendirme
         return x
 
+    def Metadata(self):
+        
+        return self.__ModelMeta
 
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 
 """
 (resnet50): Sequential(
@@ -223,5 +236,5 @@ if "__main__" == __name__:
     print(model)
     result = model(torch.randn(1, 13, 64, 64))
 
-    print(count_parameters(model))
+    print(CountModelParameters(model))
     print(result.shape)

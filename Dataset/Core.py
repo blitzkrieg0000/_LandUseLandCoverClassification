@@ -1,14 +1,11 @@
 import torch
 from matplotlib import pyplot as plt
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
 from Dataset.Const import DATASET, DATASET_CONFIG
 from Dataset.Enum import DatasetType
-from Dataset.FileReader import ReadGeoTIFF
-from Tool import ChangeMaskOrder
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
 
 
 class RemoteSensingDatasetManager():
@@ -27,6 +24,7 @@ class RemoteSensingDatasetManager():
 if "__main__" == __name__:
 	dataloader = RemoteSensingDatasetManager().GetDataloader(DatasetType.Cukurova_IO_LULC)
 	buffer, mask = next(iter(dataloader))
+
 	# Show Patches
 	fig, axs = plt.subplots(4, 4, figsize=(12, 12))
 	for i in range(16):

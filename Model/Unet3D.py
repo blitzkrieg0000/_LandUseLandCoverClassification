@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchinfo import summary
 
+from Model.Base import ModelMeta
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -14,9 +16,16 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # LULC için toplam 10 Band
 
 class UNet3D(nn.Module):
-    def __init__(self):
+    def __init__(self, num_input_channel=1, num_classes=9, patch_size=64):
         super(UNet3D, self).__init__()
         
+        # Metadata
+        self.__ModelMeta = ModelMeta(
+            NumInputChannel=num_input_channel,
+            NumClasses=num_classes,
+            PatchSize=patch_size
+        )
+
         # Down-sampling işlemleri
         self.down_conv1 = self.conv_block(1, 16)
         self.maxpool1 = nn.MaxPool3d(kernel_size=2, stride=2)
@@ -69,7 +78,6 @@ class UNet3D(nn.Module):
 
         x7 = self.bottleneck(x6)    # [1, 64, 1, 8, 8]     =>   [1, 128, 1, 8, 8]
 
-
         # =================================================================================================================== #
         #! Decoder
         # =================================================================================================================== #
@@ -93,9 +101,14 @@ class UNet3D(nn.Module):
         x = self.decoder_conv3(x)       # [1, 32, 10, 64, 64] => [1, 1, 10, 64, 64]
 
         # Final convolutional layer
-        x = F.interpolate(x, size=(9, 64, 64), mode="trilinear", align_corners=True)
+        x = F.interpolate(x, size=(self.__ModelMeta.NumClasses, self.__ModelMeta.PatchSize, self.__ModelMeta.PatchSize), mode="trilinear", align_corners=True)
         x = self.final_conv(x) # => [1, 1, 9, 64, 64]
         return x
+
+    def Metadata(self):
+        self.__ModelMeta.InputShape = (self.__ModelMeta.NumInputChannel, self.__ModelMeta.InputDepth, self.__ModelMeta.InputHeight, self.__ModelMeta.InputWidth)
+        self.__ModelMeta.OutputShape = (1, self.__ModelMeta.NumClasses, self.__ModelMeta.InputHeight, self.__ModelMeta.InputWidth)
+        return self.__ModelMeta
 
 
 if "__main__" == __name__:
@@ -105,4 +118,4 @@ if "__main__" == __name__:
     # Giriş ve çıkış boyutlarını test et
     input_tensor = torch.randn(1, 1, 10, 64, 64).to(DEVICE)  # (batch_size, channels, depth, height, width)
     output_tensor = model(input_tensor)
-    print("Çıkış boyutu:", output_tensor.shape)  # Çıkış boyutu: torch.Size([1, 9, 9, 64, 64])
+    print("Çıkış boyutu:", output_tensor.shape)  # Çıkış boyutu: torch.Size([1, 1, 9, 64, 64])
