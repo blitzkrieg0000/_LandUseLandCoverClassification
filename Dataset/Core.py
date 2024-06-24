@@ -12,7 +12,7 @@ class RemoteSensingDatasetManager():
 	def __init__(self): 
 		...
 
-	def GetDataloader(self, dataset_type: DatasetType, **override_dataset_config) -> DataLoader:
+	def GetDataloader(dataset_type: DatasetType, override_dataset_config={}) -> DataLoader:
 		dataset = DATASET[dataset_type]
 		config = DATASET_CONFIG[dataset]
 		config.update(override_dataset_config)
@@ -22,7 +22,7 @@ class RemoteSensingDatasetManager():
 
 
 if "__main__" == __name__:
-	dataloader = RemoteSensingDatasetManager().GetDataloader(DatasetType.Cukurova_IO_LULC)
+	dataloader = RemoteSensingDatasetManager.GetDataloader(DatasetType.Cukurova_IO_LULC)
 	buffer, mask = next(iter(dataloader))
 
 	# Show Patches

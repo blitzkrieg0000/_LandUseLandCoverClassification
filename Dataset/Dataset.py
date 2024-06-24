@@ -8,7 +8,7 @@ from Tool import ChangeMaskOrder
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class SentinelPatchDataset(Dataset):
+class SentinelDatasetProcessor(Dataset):
 	def __init__(self, image_paths, mask_paths, patch_size=256, model_meta:ModelMeta=None):
 		self.image_paths = image_paths
 		self.mask_paths = mask_paths

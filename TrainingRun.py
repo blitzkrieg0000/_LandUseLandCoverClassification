@@ -25,7 +25,7 @@ manager = TrainManager(model_type=ModelType.UNET_3D, override_train_configs=trai
 
 
 ##! --------------- Dataset --------------- !##
-dataset = RemoteSensingDatasetManager().GetDataloader(DatasetType.Cukurova_IO_LULC)
+dataset = RemoteSensingDatasetManager.GetDataloader(DatasetType.Cukurova_IO_LULC)
 
 
 ##! --------------- Training --------------- !##
