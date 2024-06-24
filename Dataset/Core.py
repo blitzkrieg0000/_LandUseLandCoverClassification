@@ -2,15 +2,16 @@ import torch
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 
+from Dataset.Base import BaseDatasetProcessor
 from Dataset.Const import DATASET
-from Dataset.Dataset import DatasetProcessor, SentinelDatasetProcessor
+from Dataset.Processor import SentinelDatasetProcessor
 from Dataset.Enum import DatasetType
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class RemoteSensingDatasetManager():
-	def __init__(self, dataset_processor: DatasetProcessor): 
+	def __init__(self, dataset_processor: BaseDatasetProcessor): 
 		self.DatasetProcessor = dataset_processor
 
 	def GetDataloader(self, dataset_type: DatasetType, override_dataset_config={}) -> DataLoader:

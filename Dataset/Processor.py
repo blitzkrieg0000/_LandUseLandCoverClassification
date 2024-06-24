@@ -1,19 +1,16 @@
 import torch
-from torch.utils.data import Dataset
 
+
+from Dataset.Base import BaseDatasetProcessor
 from Dataset.FileReader import ReadGeoTIFF
 from Model.Base import ModelMeta
-from Tool import ChangeMaskOrder
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-class DatasetProcessor(Dataset):
-	def __init__(self):
-		super().__init__()
 
 
-class SentinelDatasetProcessor(DatasetProcessor):
+class SentinelDatasetProcessor(BaseDatasetProcessor):
 	def __init__(self, image_paths, mask_paths, patch_size=256, model_meta:ModelMeta=None):
 		super().__init__()
 		self.image_paths = image_paths

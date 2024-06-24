@@ -1,7 +1,7 @@
 import torch
 import wandb
 
-from Dataset.DataProcess import DATA_TRANSFORMS_BY_MODEL
+from Dataset.DataTransform import DATA_TRANSFORMS_BY_MODEL
 from Model.Core import ModelManager
 from Model.Enum import ModelType
 from Train.Const import TRAIN_DEFAULTS
