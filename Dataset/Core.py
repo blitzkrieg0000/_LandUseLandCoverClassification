@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 from Dataset.Base import BaseDatasetProcessor
 from Dataset.Const import DATASET
 from Dataset.Enum import DatasetType
-from Dataset.Processor import SentinelDatasetProcessor
+from Dataset.Processor import SentinelCompositeDatasetProcessor
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,7 +23,7 @@ class RemoteSensingDatasetManager():
 
 
 if "__main__" == __name__:
-	dataloader = RemoteSensingDatasetManager(SentinelDatasetProcessor).GetDataloader(DatasetType.Cukurova_IO_LULC)
+	dataloader = RemoteSensingDatasetManager(SentinelCompositeDatasetProcessor).GetDataloader(DatasetType.Cukurova_IO_LULC)
 	buffer, mask = next(iter(dataloader))
 
 	# Show Patches

@@ -6,7 +6,7 @@ import rasterio.windows
 import torch
 
 
-class ReadGeoTIFF():
+class GeoTIFFReader():
     """
         GeoTIF/TIF/TIFF okuma işlemlerini gerçekleştirir.
     """

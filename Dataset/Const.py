@@ -1,4 +1,4 @@
-from Dataset.Processor import SentinelDatasetProcessor
+from Dataset.Processor import SentinelCompositeDatasetProcessor
 from Dataset.Enum import DatasetType
 from Model.Resnet50 import CustomResNet50
 from Model.Unet import CustomUnet
