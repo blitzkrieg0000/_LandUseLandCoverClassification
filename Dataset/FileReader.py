@@ -18,14 +18,14 @@ class GeoTIFFReader():
         self.__raster_width = 0
         self.__raster_height = 0
         self.__file=None
-        self.OpenFile()
+        self.__OpenFile()
 
     def __del__(self):
         if self.file_reader:
             self.file_reader.close()
     
     
-    def OpenFile(self):
+    def __OpenFile(self):
         self.file_reader = rasterio.open(self.filepath)
         self.__band_count = self.file_reader.count
         self.__raster_height, self.__raster_width = self.file_reader.height, self.file_reader.width

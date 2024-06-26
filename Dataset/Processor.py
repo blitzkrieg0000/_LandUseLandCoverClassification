@@ -44,7 +44,7 @@ class SentinelCompositeDatasetProcessor(BaseDatasetProcessor):
 			self.mask_readers+=[GeoTIFFReader(pth, cache=True)]
 
 
-	def GetReader(self, reader, idx:int) -> GeoTIFFReader:
+	def __GetReader(self, reader, idx:int) -> GeoTIFFReader:
 		return reader[idx]
 
 
@@ -53,7 +53,7 @@ class SentinelCompositeDatasetProcessor(BaseDatasetProcessor):
 
 
 	def __getitem__(self, idx:int):
-		buffer, window = self.GetReader(self.data_readers, idx%len(self.data_readers)).ReadRandomPatch(self.patch_size)
+		buffer, window = self.__GetReader(self.data_readers, idx%len(self.data_readers)).ReadRandomPatch(self.patch_size)
 		mask_idx = 0 if len(self.mask_readers)==1 else idx%len(self.mask_readers)
-		mask, window = self.GetReader(self.mask_readers, mask_idx).ReadRandomPatch(self.patch_size, window=window)
+		mask, window = self.__GetReader(self.mask_readers, mask_idx).ReadRandomPatch(self.patch_size, window=window)
 		return buffer, mask
