@@ -4,8 +4,8 @@ from torch.utils.data import DataLoader
 
 from Dataset.Base import BaseDatasetProcessor
 from Dataset.Const import DATASET
-from Dataset.Processor import SentinelDatasetProcessor
 from Dataset.Enum import DatasetType
+from Dataset.Processor import SentinelDatasetProcessor
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

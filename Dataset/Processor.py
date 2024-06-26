@@ -1,6 +1,5 @@
 import torch
 
-
 from Dataset.Base import BaseDatasetProcessor
 from Dataset.FileReader import ReadGeoTIFF
 from Model.Base import ModelMeta
