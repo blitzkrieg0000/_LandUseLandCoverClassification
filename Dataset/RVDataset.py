@@ -77,6 +77,7 @@ class TrackingIterator():
 
 class CustomBatchSampler(Sampler):
     def __init__(self, data_source, batch_size: int, batch_data_repeat_number: int=1, shuffle: bool=False):
+        self.Shuffle = shuffle
         self.DataSource = data_source
         self.BatchSize = batch_size
         self.BatchRepeatDataSegment = [1]*batch_size
@@ -98,6 +99,8 @@ class CustomBatchSampler(Sampler):
     def __iter__(self):
         stride = len(self.BatchRepeatDataSegment) # [1 1 1 1 1 1 1 1] | [2 2 2 2] | [3 3 2] | [8]
         indices = list(range(self.__len__()))
+        if self.Shuffle:
+            random.shuffle(indices)
         for start_idx in range(0, self.__len__(), stride):
             indexes = indices[start_idx:start_idx + stride]
             yield np.repeat(indexes, self.BatchRepeatDataSegment[:len(indexes)])
@@ -268,7 +271,7 @@ if "__main__" == __name__:
     
     print("parent pid", os.getpid())
     dataset = SpectralSegmentationDataset(dsConfig)
-    customBatchSampler = CustomBatchSampler(dataset, batch_size=8, batch_data_repeat_number=2, shuffle=False)
+    customBatchSampler = CustomBatchSampler(dataset, batch_size=8, batch_data_repeat_number=2, shuffle=T)
     DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=0, persistent_workers=False, pin_memory=True)
     
     print("Dataloader Size:", len(DATALOADER))
