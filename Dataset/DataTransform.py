@@ -51,6 +51,5 @@ DATA_TRANSFORMS_BY_MODEL = {
         "input_transform": tranformsv2.Compose([_3DCNN.NormalizeSentinel2Transform()]),
         "output_transform": tranformsv2.Compose([_3DCNN.Output2Class()]),
         "target_transform": tranformsv2.Compose([_3DCNN.Target2OneHot()])
-
     }
 }
