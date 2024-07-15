@@ -65,7 +65,11 @@ class TrackingIterator():
     
     def __getitem__(self, idx):
         self.CheckIndex()
+        print("patch index: ", self.index % len(self.iterator))
         return self.iterator[self.index % len(self.iterator)]
+
+    def __next__(self):
+        return next(iter(self.iterator))
 
     def GetIndex(self):
         return self.index
@@ -80,17 +84,19 @@ class CustomBatchSampler(Sampler):
 
 
     def RepeatedDataSegmentList(self, batch_size, batch_data_repeat_number):
-        batch_data_repeat_number = max(1, batch_data_repeat_number)
+        batch_data_repeat_number = np.clip(batch_data_repeat_number, 1, batch_size)   # min(max(1, batch_data_repeat_number), batch_size) 
         segments = np.array([batch_data_repeat_number]*(batch_size // batch_data_repeat_number) + [batch_size % batch_data_repeat_number])
-        self.BatchRepeatDataSegment = segments[segments != 0]
+        self.BatchRepeatDataSegment = segments[segments != 0] 
 
 
     def __len__(self):
+        """Random veri işleniyorsa, Epoch sayısı kadar veri oluşsun."""
+        print("Datasource Length: ", len(self.DataSource))
         return len(self.DataSource)
 
 
     def __iter__(self):
-        stride = len(self.BatchRepeatDataSegment)
+        stride = len(self.BatchRepeatDataSegment) # [1 1 1 1 1 1 1 1] | [2 2 2 2] | [3 3 2] | [8]
         indices = list(range(self.__len__()))
         for start_idx in range(0, self.__len__(), stride):
             indexes = indices[start_idx:start_idx + stride]
@@ -243,7 +249,6 @@ def GetNext(TRAIN_DATALOADER):
 
 
 if "__main__" == __name__:
-
     DATASET_PATH = GetIndexDatasetPath("MiningArea01")
     DATA_PATH = DATASET_PATH + f"/ab_mines/data/"
     MASK_PATH = DATASET_PATH + f"/ab_mines/masks/"
@@ -252,20 +257,23 @@ if "__main__" == __name__:
         ClassNames=["background", "excavation_area"],
         ClassColors=["lightgray", "darkred"],
         NullClass="background",
-        MaxWindowsPerScene=None,                       # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+        MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
         PatchSize=(224, 224),
         PaddingSize=0,
         Shuffle=False,
         Epoch=100,
         DatasetRootPath=DATASET_PATH,
-        RandomPatch=False
+        RandomPatch=True
     )
     
     print("parent pid", os.getpid())
     dataset = SpectralSegmentationDataset(dsConfig)
-    customBatchSampler = CustomBatchSampler(dataset, batch_size=8, batch_data_repeat_number=4, shuffle=False)
+    customBatchSampler = CustomBatchSampler(dataset, batch_size=8, batch_data_repeat_number=2, shuffle=False)
     DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=0, persistent_workers=False, pin_memory=True)
     
-    print(len(DATALOADER))
-    GetNext(DATALOADER)
+    print("Dataloader Size:", len(DATALOADER))
     # GetNext(DATALOADER)
+    # GetNext(DATALOADER)
+
+    for i, (buffer, mask) in enumerate(DATALOADER):
+        print(i, buffer.shape, mask.shape)
