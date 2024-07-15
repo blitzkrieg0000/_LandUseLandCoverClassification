@@ -1,4 +1,7 @@
 import os
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import random
 from functools import reduce
 from typing import Annotated, List, Tuple
@@ -17,6 +20,9 @@ from torch.utils.data import DataLoader, Dataset, Sampler
 
 from Tool.DataStorage import GetIndexDatasetPath
 from Tool.Util import DataSourceMeta, FilePath, ReadDatasetFromIndexFile
+
+
+
 
 
 #%%----------------------------------------------------------------------------------------------------------------
@@ -237,6 +243,7 @@ def GetNext(TRAIN_DATALOADER):
 
 
 if "__main__" == __name__:
+
     DATASET_PATH = GetIndexDatasetPath("MiningArea01")
     DATA_PATH = DATASET_PATH + f"/ab_mines/data/"
     MASK_PATH = DATASET_PATH + f"/ab_mines/masks/"
