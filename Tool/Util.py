@@ -5,10 +5,6 @@ from typing import Annotated, List, Optional
 from pydantic import BaseModel, Field, validator
 from Tool.DataStorage import GetIndexDatasetPath
 
-DATASET_PATH = GetIndexDatasetPath("MiningArea01")
-DATA_PATH = DATASET_PATH + f"/ab_mines/data/"
-MASK_PATH = DATASET_PATH + f"/ab_mines/masks/"
-
 
 class FilePath(BaseModel):
     Path: Annotated[str, Field(..., description="File Path")]
@@ -80,6 +76,10 @@ def ReadDatasetFromIndexFile(dataset_dir: str) -> List[DataSourceMeta]:
 
 
 if "__main__" == __name__:
+    DATASET_PATH = GetIndexDatasetPath("MiningArea01")
+    DATA_PATH = DATASET_PATH + f"/ab_mines/data/"
+    MASK_PATH = DATASET_PATH + f"/ab_mines/masks/"
+
     dataset = ExtractDatasetMeta(DATA_PATH, MASK_PATH)
     CrateDatasetIndexFile(dataset, save_dir=DATASET_PATH)
     data = ReadDatasetFromIndexFile(DATASET_PATH)

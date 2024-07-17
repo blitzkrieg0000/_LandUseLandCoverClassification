@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 import os
 import sys
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import random
 from functools import reduce
 from typing import Annotated, List, Tuple
 
-from matplotlib import pyplot as plt
 import numpy as np
+
 from pydantic import BaseModel
 from rastervision.core.data import (ClassConfig, MultiRasterSource,
                                     RasterioSource, Scene,
@@ -19,11 +22,9 @@ from rastervision.pytorch_learner import (
 from torch.utils.data import DataLoader, Dataset, Sampler
 
 from Tool.DataStorage import GetIndexDatasetPath
-from Tool.Util import DataSourceMeta, FilePath, ReadDatasetFromIndexFile
-
-
-
-
+from Tool.Util import (CrateDatasetIndexFile, DataSourceMeta, FilePath,
+                       ReadDatasetFromIndexFile)
+from matplotlib import pyplot as plt
 
 #%%----------------------------------------------------------------------------------------------------------------
 class SpectralSegmentationDatasetConfig(BaseModel):
@@ -39,7 +40,12 @@ class SpectralSegmentationDatasetConfig(BaseModel):
     RandomPatch:Annotated[bool, "Random Patch"]=True
 
 
-class TrackingIterator():
+class SegmentationDataset(Dataset):
+    def __init__(self):
+        self.RandomPatch: SpectralSegmentationDatasetConfig
+
+
+class TrackableIterator():
     def __init__(self, iterator, limit=None, cycle=False):
         self.iterator = iterator
         self.Limit = limit or len(iterator)
@@ -48,6 +54,8 @@ class TrackingIterator():
         self._Cycle = cycle
         if self.Limit > len(iterator):
             self._Cycle = True
+        else:
+            self._Cycle = False
 
     def CheckIndex(self):
         self.index += 1
@@ -76,10 +84,11 @@ class TrackingIterator():
 
 
 class CustomBatchSampler(Sampler):
-    def __init__(self, data_source, batch_size: int, batch_data_repeat_number: int=1, shuffle: bool=False):
+    def __init__(self, data_source: SegmentationDataset, batch_size: int, batch_data_repeat_number: int=1, shuffle: bool=False, drop_last: bool=True):
         self.Shuffle = shuffle
         self.DataSource = data_source
         self.BatchSize = batch_size
+        self._DropLast = drop_last
         self.BatchRepeatDataSegment = [1]*batch_size
         self.RepeatedDataSegmentList(batch_size, batch_data_repeat_number)
 
@@ -95,20 +104,30 @@ class CustomBatchSampler(Sampler):
         print("Datasource Length: ", len(self.DataSource))
         return len(self.DataSource)
 
+    # [1 2 3 4 - 5 6 7 8 - 9 10 11 12]         [1 1 2 2 3 3 4 4]
 
     def __iter__(self):
         stride = len(self.BatchRepeatDataSegment) # [1 1 1 1 1 1 1 1] | [2 2 2 2] | [3 3 2] | [8]
         indices = list(range(self.__len__()))
         if self.Shuffle:
             random.shuffle(indices)
-        for start_idx in range(0, self.__len__(), stride):
+        
+        margin = stride if self._DropLast and self.__len__() % stride != 0 else 0
+
+        step = stride if not self.DataSource.RandomPatch else 1
+        for start_idx in range(0, self.__len__() - margin, step):
             indexes = indices[start_idx:start_idx + stride]
-            yield np.repeat(indexes, self.BatchRepeatDataSegment[:len(indexes)])
+            yield np.repeat(indexes, self.BatchRepeatDataSegment[:len(indexes)])  # [4 4]
+        
+        # for epoch in range(self.__len__()):
+        #     choices = random.choices(range(0, self.__len__()), k=len(self.BatchRepeatDataSegment)) # shufle
+        #     yield np.repeat(choices, self.BatchRepeatDataSegment)
 
 
 
-class SpectralSegmentationDataset(Dataset):
+class SpectralSegmentationDataset(SegmentationDataset):
     def __init__(self, config: SpectralSegmentationDatasetConfig):
+        super().__init__()
         self.ClassConfig = ClassConfig(names=config.ClassNames, colors=config.ClassColors, null_class=config.NullClass)
         self.MaxWindowsPerScene = config.MaxWindowsPerScene
         self.PatchSize = config.PatchSize
@@ -118,11 +137,12 @@ class SpectralSegmentationDataset(Dataset):
         self.RandomPatch = config.RandomPatch
         self.GeoDatasetCache = {}
         self.DatasetIndexMeta = ReadDatasetFromIndexFile(config.DatasetRootPath)
+        self.DatasetIndexMeta = self.DatasetIndexMeta[:1]
         self.ShuffleDataset()
 
 
     def __len__(self):
-        return self.Epoch or len(self.DatasetIndexMeta)
+        return self.Epoch if self.RandomPatch else len(self.DatasetIndexMeta)
 
 
     def __getitem__(self, idx):
@@ -132,7 +152,7 @@ class SpectralSegmentationDataset(Dataset):
         print("index: ", idx, "scene: ", _data.Scene, "pid", os.getpid())
         if geoDataset is None:
             geoDataset = self.LoadData(_data)
-            geoDataset = TrackingIterator(geoDataset)
+            geoDataset = TrackableIterator(geoDataset)
             self.GeoDatasetCache[_data.Scene] = geoDataset
         
         #! Get Next
@@ -230,7 +250,7 @@ def ShowDatasetViaVisualizer(dataset):
 def ShowRaster(raster):
     fig, ax = plt.subplots(4, 4, figsize=(7, 7))
     for i in range(12):
-        ax[i%4, i//4].matshow(raster[:, :, [i]], cmap="plasma")
+        ax[i%4, i//4].matshow(raster[:, :, [i]], cmap="viridis")
         ax[i%4, i//4].axis("off")
 
     plt.show()
@@ -247,12 +267,12 @@ def GetNext(TRAIN_DATALOADER):
             axs[i%4, i//4].axis("off")
         axs[3, 3].imshow(mask[batch])
         plt.tight_layout()
-        plt.show()
+        # plt.show()
 
 
 
 if "__main__" == __name__:
-    DATASET_PATH = GetIndexDatasetPath("MiningArea01")
+    DATASET_PATH = "C:\\Users\\DGH\\source\\repos\\Local\\data\\GIS\\Sentinel2\\MiningArea01" # GetIndexDatasetPath("MiningArea01")
     DATA_PATH = DATASET_PATH + f"/ab_mines/data/"
     MASK_PATH = DATASET_PATH + f"/ab_mines/masks/"
 
@@ -266,17 +286,32 @@ if "__main__" == __name__:
         Shuffle=False,
         Epoch=100,
         DatasetRootPath=DATASET_PATH,
-        RandomPatch=True
+        RandomPatch=False
     )
     
+
     print("parent pid", os.getpid())
     dataset = SpectralSegmentationDataset(dsConfig)
-    customBatchSampler = CustomBatchSampler(dataset, batch_size=8, batch_data_repeat_number=2, shuffle=T)
+    # CrateDatasetIndexFile(dataset, save_dir=DATASET_PATH)
+    customBatchSampler = CustomBatchSampler(dataset, batch_size=8, batch_data_repeat_number=8, shuffle=False)
     DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=0, persistent_workers=False, pin_memory=True)
     
+    
     print("Dataloader Size:", len(DATALOADER))
-    # GetNext(DATALOADER)
-    # GetNext(DATALOADER)
 
-    for i, (buffer, mask) in enumerate(DATALOADER):
-        print(i, buffer.shape, mask.shape)
+
+
+    #%%
+    # for i, (buffer, mask) in enumerate(DATALOADER):
+    #     print(i, buffer.shape, mask.shape, "\n-----------------\n" )
+    
+
+    #%% 
+    for x in range(10):
+        GetNext(DATALOADER)
+
+
+
+    
+
+
