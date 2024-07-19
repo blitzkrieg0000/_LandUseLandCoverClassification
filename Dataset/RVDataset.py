@@ -50,11 +50,12 @@ class SegmentationDatasetConfig(BaseModel):
 class SegmentationDataset(Dataset):
     def __init__(self):
         self.RandomPatch: SegmentationDatasetConfig
-
+        self.ExpiredScenes: List[str]
 
 
 class TrackableIterator():
-    def __init__(self, iterator, cycle=True):
+    def __init__(self, iterator, id, cycle=False):
+        self.Id = id
         self.Index = -1
         self._Expired = False
         self._Cycle = cycle
@@ -71,7 +72,7 @@ class TrackableIterator():
 
 
     def __len__(self):
-        return len(self.Iterator)
+        return len(self.Iterator) 
     
 
     def __getitem__(self, id):
@@ -85,8 +86,15 @@ class TrackableIterator():
     def CheckIndex(self):
         if self._Expired and not self._Cycle:
             raise IndexError
+        
+        margin = max(CustomBatchSampler.BatchRepeatDataSegment)
+        
+        if 0 != self.__len__() % margin:
+            margin = margin - self.__len__() % margin
+        else:
+            margin = 0
 
-        self._Expired = self.Index >= self.__len__()-1
+        self._Expired = self.Index >= self.__len__() + margin - 1    # TODO Eğer alınamayacak kadar window varsa drop_last uygula veya 1 kerelik cycle yap
 
 
     def GetIndex(self):
@@ -95,6 +103,8 @@ class TrackableIterator():
 
 
 class CustomBatchSampler(Sampler):
+    print("pid")
+    BatchRepeatDataSegment = None
     def __init__(self, data_source: SegmentationDataset, config: SegmentationDatasetConfig):
         self.Shuffle = config.Shuffle
         self.RandomPatch = config.RandomPatch
@@ -102,15 +112,15 @@ class CustomBatchSampler(Sampler):
         self.BatchSize = config.BatchSize
         self._DropLast = config.DropLastBatch
         self.Epoch = config.Epoch
-        self.BatchRepeatDataSegment = [1]*config.BatchSize
-        self.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
+        CustomBatchSampler.BatchRepeatDataSegment = [1]*config.BatchSize
+        CustomBatchSampler.BatchRepeatDataSegment = CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
 
-
-    def RepeatedDataSegmentList(self, batch_size, batch_data_repeat_number):
+    @staticmethod
+    def RepeatedDataSegmentList(batch_size, batch_data_repeat_number):
         """[1 1 1 1 1 1 1 1], [2 2 2 2], [3 3 2], [8]"""
         chunkSize = torch.clamp(torch.tensor(batch_data_repeat_number), 1, batch_size)
         chunks = torch.chunk(torch.arange(batch_size), chunkSize)
-        self.BatchRepeatDataSegment = list(map(len, chunks))
+        return list(map(len, chunks))
 
 
     def __len__(self):
@@ -123,9 +133,20 @@ class CustomBatchSampler(Sampler):
         if self.Shuffle:
             random.shuffle(indices)
 
-        for i in range(self.__len__()):
-            choices = random.choices(indices, k=len(self.BatchRepeatDataSegment))
-            yield np.repeat(choices, self.BatchRepeatDataSegment)
+        # Random Patch
+        i = 0
+        while True:
+            new_indices = list(set(indices)-set(self.DataSource.ExpiredScenes))
+            choices = random.sample(new_indices, k=len(CustomBatchSampler.BatchRepeatDataSegment))     # TODO np.choices de tek bir durum varsa
+            yield np.repeat(choices, CustomBatchSampler.BatchRepeatDataSegment)                         
+        
+            i+=1
+            if self.RandomPatch and i >= self.__len__():
+                print("Random Patch Done")
+                raise StopIteration
+            
+            if self.RandomPatch and len(self.DataSource.ExpiredScenes)==len(self.DataSource)-1:
+                raise StopIteration
 
 
 
@@ -140,6 +161,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
         self.RandomPatch = config.RandomPatch
         self.GeoDatasetCache = {}
         self.DatasetIndexMeta = ReadDatasetFromIndexFile(config.DatasetRootPath)
+        # self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
         self.ExpiredScenes = []
 
 
@@ -149,28 +171,36 @@ class SpectralSegmentationDataset(SegmentationDataset):
 
     def __getitem__(self, idx):
         idx %= len(self.DatasetIndexMeta)
-        _data = self.DatasetIndexMeta[idx % len(self.DatasetIndexMeta)]
+        _data: DataSourceMeta = self.DatasetIndexMeta[idx % len(self.DatasetIndexMeta)]
         geoDataset = self.GeoDatasetCache.get(_data.Scene, None)            # TODO State'i tut.
         print("index: ", idx, "scene: ", _data.Scene, "pid", os.getpid())
         if geoDataset is None:
             geoDataset = self.LoadData(_data)
-            geoDataset = TrackableIterator(geoDataset)
+            geoDataset = TrackableIterator(geoDataset, idx)
             self.GeoDatasetCache[_data.Scene] = geoDataset                    
         
         #! Get Next
-        # data, label = geoDataset[idx]
+        data = label = None
         if self.RandomPatch:
             data, label = next(iter(geoDataset))     # TODO: Handle => "StopIteration" Exception
         else:
-            data, label = geoDataset[idx]            # TODO: Handle => "IndexError" Exception
-
-        if geoDataset._Expired:
-            self.ExpiredScenes+=[idx]
-
-        if len(self.DatasetIndexMeta)==len(self.ExpiredScenes):
-            self.ExpiredScenes = []
+            try:
+                data, label = geoDataset[idx]            # TODO: Handle => "IndexError" Exception
+            except IndexError as e:
+                print(e)
+                self.CheckExpiring(geoDataset)
         
         return data, label
+
+
+    def CheckExpiring(self, geoDataset:TrackableIterator):
+        if geoDataset._Expired:
+            self.ExpiredScenes+=[geoDataset.Id]
+
+        if len(self.ExpiredScenes)==len(self.DatasetIndexMeta):
+            self.ExpiredScenes.clear()
+            raise StopIteration
+        # TODO Indexable Verilerin indexlerini de sıfırla
 
 
     def FindPrimarySource(self, bands: List[DataSourceMeta]):
@@ -301,10 +331,10 @@ if "__main__" == __name__:
         PatchSize=(224, 224),
         PaddingSize=0,
         Shuffle=True,
-        Epoch=2,
+        Epoch=1,
         DatasetRootPath=DATASET_PATH,
-        RandomPatch=True,
-        BatchDataRepeatNumber=4,
+        RandomPatch=False,
+        BatchDataRepeatNumber=2,
         BatchSize=8,
         DropLastBatch=True
     )
@@ -314,13 +344,15 @@ if "__main__" == __name__:
     customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
     DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=0, persistent_workers=False, pin_memory=True)
 
+    print(CustomBatchSampler.BatchRepeatDataSegment)
+    
 
     for buffer, mask in DATALOADER:
-        print(buffer.shape, mask.shape)
-
+        print("\n", buffer.shape, mask.shape, "\n-----------------\n" )
+        
 
     #! VisualizeData
-    VisualizeData(DATALOADER)
+    # VisualizeData(DATALOADER)
     
     
 
