@@ -53,13 +53,25 @@ class SegmentationDataset(Dataset):
         self.ExpiredScenes: List[str]
 
 
+
 class TrackableIterator():
-    def __init__(self, iterator, id, cycle=False):
+    def __init__(self, iterator, id, margin:int=None, cycle=False):
         self.Id = id
         self.Index = -1
+        self.Margin = margin
         self._Expired = False
         self._Cycle = cycle
         self.Iterator = iterator
+        self._InUse = False
+
+
+    def __enter__(self):
+        self._InUse = True
+        return self
+
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._InUse = False
 
 
     def __iter__(self):
@@ -79,16 +91,16 @@ class TrackableIterator():
         """For Sliding GeoDataset"""
         self.Index += 1
         self.CheckIndex()
-        print("Trackable Iterator - Patch Index: ", self.Index, "-%-", self.Index % len(self.Iterator))
+        print("Trackable Iterator:\t", "-Patch Index: ", self.Index, "-Mod Index", self.Index % len(self.Iterator))
         return self.Iterator[self.Index % self.__len__()]
 
 
     def CheckIndex(self):
-        if self._Expired and not self._Cycle:
+        if (self._Expired and not self._Cycle) or not self._InUse:
             raise IndexError
         
-        margin = max(CustomBatchSampler.BatchRepeatDataSegment)
-        
+        margin = self.Margin or max(CustomBatchSampler.BatchRepeatDataSegment)
+
         if 0 != self.__len__() % margin:
             margin = margin - self.__len__() % margin
         else:
@@ -103,7 +115,6 @@ class TrackableIterator():
 
 
 class CustomBatchSampler(Sampler):
-    print("pid")
     BatchRepeatDataSegment = None
     def __init__(self, data_source: SegmentationDataset, config: SegmentationDatasetConfig):
         self.Shuffle = config.Shuffle
@@ -114,6 +125,7 @@ class CustomBatchSampler(Sampler):
         self.Epoch = config.Epoch
         CustomBatchSampler.BatchRepeatDataSegment = [1]*config.BatchSize
         CustomBatchSampler.BatchRepeatDataSegment = CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
+
 
     @staticmethod
     def RepeatedDataSegmentList(batch_size, batch_data_repeat_number):
@@ -137,7 +149,13 @@ class CustomBatchSampler(Sampler):
         i = 0
         while True:
             new_indices = list(set(indices)-set(self.DataSource.ExpiredScenes))
-            choices = random.sample(new_indices, k=len(CustomBatchSampler.BatchRepeatDataSegment))     # TODO np.choices de tek bir durum varsa
+        
+            choices = np.random.choice(
+                new_indices,
+                size=len(CustomBatchSampler.BatchRepeatDataSegment),
+                replace=len(new_indices) < len(CustomBatchSampler.BatchRepeatDataSegment)
+            )
+
             yield np.repeat(choices, CustomBatchSampler.BatchRepeatDataSegment)                         
         
             i+=1
@@ -153,6 +171,7 @@ class CustomBatchSampler(Sampler):
 class SpectralSegmentationDataset(SegmentationDataset):
     def __init__(self, config: SegmentationDatasetConfig):
         super().__init__()
+        self.Config = config
         self.ClassConfig = ClassConfig(names=config.ClassNames, colors=config.ClassColors, null_class=config.NullClass)
         self.MaxWindowsPerScene = config.MaxWindowsPerScene
         self.PatchSize = config.PatchSize
@@ -173,10 +192,10 @@ class SpectralSegmentationDataset(SegmentationDataset):
         idx %= len(self.DatasetIndexMeta)
         _data: DataSourceMeta = self.DatasetIndexMeta[idx % len(self.DatasetIndexMeta)]
         geoDataset = self.GeoDatasetCache.get(_data.Scene, None)            # TODO State'i tut.
-        print("index: ", idx, "scene: ", _data.Scene, "pid", os.getpid())
+        print("SegmentationDataset:\t", "-index: ", idx, "-scene: ", _data.Scene, "-pid", os.getpid())
         if geoDataset is None:
             geoDataset = self.LoadData(_data)
-            geoDataset = TrackableIterator(geoDataset, idx)
+            geoDataset = TrackableIterator(geoDataset, idx, margin = self.Config.BatchSize)
             self.GeoDatasetCache[_data.Scene] = geoDataset                    
         
         #! Get Next
@@ -185,10 +204,11 @@ class SpectralSegmentationDataset(SegmentationDataset):
             data, label = next(iter(geoDataset))     # TODO: Handle => "StopIteration" Exception
         else:
             try:
-                data, label = geoDataset[idx]            # TODO: Handle => "IndexError" Exception
+                with geoDataset as _geoDataset:
+                    data, label = _geoDataset[idx]
             except IndexError as e:
                 print(e)
-                self.CheckExpiring(geoDataset)
+            self.CheckExpiring(geoDataset)
         
         return data, label
 
@@ -342,13 +362,13 @@ if "__main__" == __name__:
     print("parent pid", os.getpid())
     dataset = SpectralSegmentationDataset(dsConfig)
     customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
-    DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=0, persistent_workers=False, pin_memory=True)
+    DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=1, persistent_workers=False, pin_memory=True)
 
     print(CustomBatchSampler.BatchRepeatDataSegment)
     
 
-    for buffer, mask in DATALOADER:
-        print("\n", buffer.shape, mask.shape, "\n-----------------\n" )
+    for i, (buffer, mask) in enumerate(DATALOADER):
+        print("\n", i, buffer.shape, mask.shape, "\n-----------------\n" )
         
 
     #! VisualizeData
