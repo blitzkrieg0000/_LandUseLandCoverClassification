@@ -62,17 +62,6 @@ class TrackableIterator():
         self._Expired = False
         self._Cycle = cycle
         self.Iterator = iterator
-        self._InUse = False
-
-
-    def __enter__(self):
-        self._InUse = True
-        return self
-
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._InUse = False
-
 
     def __iter__(self):
         return self
@@ -96,7 +85,7 @@ class TrackableIterator():
 
 
     def CheckIndex(self):
-        if (self._Expired and not self._Cycle) or not self._InUse:
+        if (self._Expired and not self._Cycle):
             raise IndexError
         
         margin = self.Margin or max(CustomBatchSampler.BatchRepeatDataSegment)
@@ -195,7 +184,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
         print("SegmentationDataset:\t", "-index: ", idx, "-scene: ", _data.Scene, "-pid", os.getpid())
         if geoDataset is None:
             geoDataset = self.LoadData(_data)
-            geoDataset = TrackableIterator(geoDataset, idx, margin = self.Config.BatchSize)
+            geoDataset = TrackableIterator(geoDataset, idx, margin = self.Config.BatchSize, cycle=True)
             self.GeoDatasetCache[_data.Scene] = geoDataset                    
         
         #! Get Next
@@ -204,8 +193,8 @@ class SpectralSegmentationDataset(SegmentationDataset):
             data, label = next(iter(geoDataset))     # TODO: Handle => "StopIteration" Exception
         else:
             try:
-                with geoDataset as _geoDataset:
-                    data, label = _geoDataset[idx]
+
+                data, label = geoDataset[idx]
             except IndexError as e:
                 print(e)
             self.CheckExpiring(geoDataset)
@@ -362,7 +351,7 @@ if "__main__" == __name__:
     print("parent pid", os.getpid())
     dataset = SpectralSegmentationDataset(dsConfig)
     customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
-    DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=1, persistent_workers=False, pin_memory=True)
+    DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=0, persistent_workers=False, pin_memory=True)
 
     print(CustomBatchSampler.BatchRepeatDataSegment)
     
