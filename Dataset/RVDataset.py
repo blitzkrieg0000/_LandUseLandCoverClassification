@@ -78,7 +78,7 @@ class TrackableIterator():
         """For Sliding GeoDataset"""
         self.Index += 1
         self.CheckIndex()
-        print("Trackable Iterator:\t", "-Patch Index: ", self.Index, "-Mod Index", self.Index % len(self.Iterator))
+        print(f"Trackable Iterator:-> Patch Index: {self.Index}-%-{self.Index % len(self.Iterator)}")
         return self.Iterator[self.Index % self.__len__()]
 
 
@@ -99,7 +99,6 @@ class TrackableIterator():
         return self.Index
 
 
-
 class CustomBatchSampler(Sampler):
     BatchRepeatDataSegment = None
     def __init__(self, data_source: SegmentationDataset, config: SegmentationDatasetConfig):
@@ -109,13 +108,10 @@ class CustomBatchSampler(Sampler):
         self.BatchSize = config.BatchSize
         self._DropLast = config.DropLastBatch
         self.Epoch = config.Epoch
-        CustomBatchSampler.BatchRepeatDataSegment = [1]*config.BatchSize
-        CustomBatchSampler.BatchRepeatDataSegment = CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
         self.Index = -1
         self.Indices = list(range(len(self.DataSource)))
-        print("Batch Sampler PID:", os.getpid())
-        if self.Shuffle:
-            random.shuffle(self.Indices)
+        CustomBatchSampler.BatchRepeatDataSegment = [1]*config.BatchSize
+        CustomBatchSampler.BatchRepeatDataSegment = CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
 
 
     @staticmethod
@@ -131,6 +127,8 @@ class CustomBatchSampler(Sampler):
 
 
     def __iter__(self):
+        if self.Shuffle:
+            random.shuffle(self.Indices)
         return self
 
 
@@ -145,14 +143,14 @@ class CustomBatchSampler(Sampler):
         )          
     
         self.Index+=1
+
+        # Sadece Random Patch ise belirli bir epoch sayısı kadar batchler için index üretir.
         if self.RandomPatch and self.Index >= self.__len__():
             print("Random Patch Done")
             raise StopIteration
         
-        if self.RandomPatch and len(self.DataSource.ExpiredScenes)==len(self.DataSource)-1:
-            raise StopIteration
-
         return np.repeat(choices, CustomBatchSampler.BatchRepeatDataSegment)  
+
 
 
 class SpectralSegmentationDataset(SegmentationDataset):
@@ -167,7 +165,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
         self.RandomPatch = config.RandomPatch
         self.GeoDatasetCache = {}
         self.DatasetIndexMeta = ReadDatasetFromIndexFile(config.DatasetRootPath)
-        self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
+        # self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
         self.ExpiredScenes = []
         self.start_idx = 0
         self.end_idx = -1
@@ -179,8 +177,8 @@ class SpectralSegmentationDataset(SegmentationDataset):
 
     def __getitem__(self, idx):
         worker_info = torch.utils.data.get_worker_info()
-        
-        print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id}/{worker_info.num_workers} workers")
+        if worker_info:
+            print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id}/{worker_info.num_workers} workers")
 
         idx %= len(self.DatasetIndexMeta)
         _data: DataSourceMeta = self.DatasetIndexMeta[idx % len(self.DatasetIndexMeta)]
@@ -372,21 +370,21 @@ dataset = SpectralSegmentationDataset(dsConfig)
 
 customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
 
-DATALOADER = DataLoader(
-    dataset,
-    batch_sampler=customBatchSampler,
-    num_workers=1,
-    persistent_workers=False, 
-    pin_memory=True,
-    # collate_fn=custom_collate_fn,
-    multiprocessing_context = torch.multiprocessing.get_context("spawn")
-)
-print(CustomBatchSampler.BatchRepeatDataSegment)
-
 
 
 if "__main__" == __name__:
     print("Main Process Id:", os.getpid())
+
+    DATALOADER = DataLoader(
+        dataset,
+        batch_sampler=customBatchSampler,
+        num_workers=0,
+        persistent_workers=False, 
+        pin_memory=True,
+        collate_fn=custom_collate_fn,
+        # multiprocessing_context = torch.multiprocessing.get_context("spawn")
+    )
+
 
     for i, (buffer, mask) in enumerate(DATALOADER):
         print("\n", f"Batch: {i}", buffer.shape, mask.shape, "\n", "-"*10)
