@@ -28,7 +28,6 @@ from Tool.Util import (CrateDatasetIndexFile, DataSourceMeta, FilePath,
                        ReadDatasetFromIndexFile)
 
 
-
 #%%----------------------------------------------------------------------------------------------------------------
 class SegmentationDatasetConfig(BaseModel):
     ClassNames: Annotated[List[str], "Class Names"]
@@ -55,10 +54,9 @@ class SegmentationDataset(Dataset):
 
 
 class TrackableIterator():
-    def __init__(self, iterator, id, margin:int=None, cycle=False):
+    def __init__(self, iterator, id, cycle=False):
         self.Id = id
         self.Index = -1
-        self.Margin = margin
         self._Expired = False
         self._Cycle = cycle
         self.Iterator = iterator
@@ -88,8 +86,7 @@ class TrackableIterator():
         if (self._Expired and not self._Cycle):
             raise IndexError
         
-        margin = self.Margin or max(CustomBatchSampler.BatchRepeatDataSegment)
-
+        margin = max(CustomBatchSampler.BatchRepeatDataSegment)
         if 0 != self.__len__() % margin:
             margin = margin - self.__len__() % margin
         else:
@@ -114,6 +111,11 @@ class CustomBatchSampler(Sampler):
         self.Epoch = config.Epoch
         CustomBatchSampler.BatchRepeatDataSegment = [1]*config.BatchSize
         CustomBatchSampler.BatchRepeatDataSegment = CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
+        self.Index = -1
+        self.Indices = list(range(len(self.DataSource)))
+        print("Batch Sampler PID:", os.getpid())
+        if self.Shuffle:
+            random.shuffle(self.Indices)
 
 
     @staticmethod
@@ -129,32 +131,28 @@ class CustomBatchSampler(Sampler):
 
 
     def __iter__(self):
-        indices = list(range(len(self.DataSource)))
+        return self
 
-        if self.Shuffle:
-            random.shuffle(indices)
 
+    def __next__(self):
         # Random Patch
-        i = 0
-        while True:
-            new_indices = list(set(indices)-set(self.DataSource.ExpiredScenes))
+        new_indices = list(set(self.Indices)-set(self.DataSource.ExpiredScenes))
+    
+        choices = np.random.choice(
+            new_indices,
+            size=len(CustomBatchSampler.BatchRepeatDataSegment),
+            replace=len(new_indices) < len(CustomBatchSampler.BatchRepeatDataSegment)
+        )          
+    
+        self.Index+=1
+        if self.RandomPatch and self.Index >= self.__len__():
+            print("Random Patch Done")
+            raise StopIteration
         
-            choices = np.random.choice(
-                new_indices,
-                size=len(CustomBatchSampler.BatchRepeatDataSegment),
-                replace=len(new_indices) < len(CustomBatchSampler.BatchRepeatDataSegment)
-            )
+        if self.RandomPatch and len(self.DataSource.ExpiredScenes)==len(self.DataSource)-1:
+            raise StopIteration
 
-            yield np.repeat(choices, CustomBatchSampler.BatchRepeatDataSegment)                         
-        
-            i+=1
-            if self.RandomPatch and i >= self.__len__():
-                print("Random Patch Done")
-                raise StopIteration
-            
-            if self.RandomPatch and len(self.DataSource.ExpiredScenes)==len(self.DataSource)-1:
-                raise StopIteration
-
+        return np.repeat(choices, CustomBatchSampler.BatchRepeatDataSegment)  
 
 
 class SpectralSegmentationDataset(SegmentationDataset):
@@ -169,8 +167,10 @@ class SpectralSegmentationDataset(SegmentationDataset):
         self.RandomPatch = config.RandomPatch
         self.GeoDatasetCache = {}
         self.DatasetIndexMeta = ReadDatasetFromIndexFile(config.DatasetRootPath)
-        # self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
+        self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
         self.ExpiredScenes = []
+        self.start_idx = 0
+        self.end_idx = -1
 
 
     def __len__(self):
@@ -178,13 +178,17 @@ class SpectralSegmentationDataset(SegmentationDataset):
     
 
     def __getitem__(self, idx):
+        worker_info = torch.utils.data.get_worker_info()
+        
+        print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id}/{worker_info.num_workers} workers")
+
         idx %= len(self.DatasetIndexMeta)
         _data: DataSourceMeta = self.DatasetIndexMeta[idx % len(self.DatasetIndexMeta)]
         geoDataset = self.GeoDatasetCache.get(_data.Scene, None)            # TODO State'i tut.
-        print("SegmentationDataset:\t", "-index: ", idx, "-scene: ", _data.Scene, "-pid", os.getpid())
+        print(f"SpectralSegmentationDataset:-> index: {idx}, scene: {_data.Scene}, pid: {os.getpid()}")
         if geoDataset is None:
             geoDataset = self.LoadData(_data)
-            geoDataset = TrackableIterator(geoDataset, idx, margin = self.Config.BatchSize, cycle=True)
+            geoDataset = TrackableIterator(geoDataset, idx, cycle=True)
             self.GeoDatasetCache[_data.Scene] = geoDataset                    
         
         #! Get Next
@@ -193,13 +197,20 @@ class SpectralSegmentationDataset(SegmentationDataset):
             data, label = next(iter(geoDataset))     # TODO: Handle => "StopIteration" Exception
         else:
             try:
-
                 data, label = geoDataset[idx]
             except IndexError as e:
                 print(e)
             self.CheckExpiring(geoDataset)
-        
+        print("---")
         return data, label
+
+
+    def set_worker_info(self, worker_id, num_workers):
+        self.worker_id = worker_id
+        self.num_workers = num_workers
+        self.segment_size = len(self.DatasetIndexMeta) // self.num_workers
+        self.start_idx = self.worker_id * self.segment_size
+        self.end_idx = (self.worker_id + 1) * self.segment_size if self.worker_id != self.num_workers - 1 else len(self.data)
 
 
     def CheckExpiring(self, geoDataset:TrackableIterator):
@@ -325,39 +336,60 @@ def VisualizeData(dataloader, limit=None):
     plt.show()
 
 
+def worker_init_fn(worker_id):
+    worker_info = torch.utils.data.get_worker_info()
+    dataset = worker_info.dataset
+    dataset.set_worker_info(worker_id, worker_info.num_workers)
+
+
+def custom_collate_fn(batch):
+    data, label = zip(*batch)
+    return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
+
+
+DATASET_PATH = GetIndexDatasetPath("MiningArea01")   #"C:\\Users\\DGH\\source\\repos\\Local\\data\\GIS\\Sentinel2\\MiningArea01" # 
+DATA_PATH = DATASET_PATH + f"/ab_mines/data/"
+MASK_PATH = DATASET_PATH + f"/ab_mines/masks/"
+
+dsConfig = SegmentationDatasetConfig(
+    ClassNames=["background", "excavation_area"],
+    ClassColors=["lightgray", "darkred"],
+    NullClass="background",
+    MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+    PatchSize=(224, 224),
+    PaddingSize=0,
+    Shuffle=True,
+    Epoch=1,
+    DatasetRootPath=DATASET_PATH,
+    RandomPatch=False,
+    BatchDataRepeatNumber=2,
+    BatchSize=8,
+    DropLastBatch=True
+)
+
+
+dataset = SpectralSegmentationDataset(dsConfig)
+
+customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
+
+DATALOADER = DataLoader(
+    dataset,
+    batch_sampler=customBatchSampler,
+    num_workers=1,
+    persistent_workers=False, 
+    pin_memory=True,
+    # collate_fn=custom_collate_fn,
+    multiprocessing_context = torch.multiprocessing.get_context("spawn")
+)
+print(CustomBatchSampler.BatchRepeatDataSegment)
+
+
 
 if "__main__" == __name__:
-    DATASET_PATH = GetIndexDatasetPath("MiningArea01")   #"C:\\Users\\DGH\\source\\repos\\Local\\data\\GIS\\Sentinel2\\MiningArea01" # 
-    DATA_PATH = DATASET_PATH + f"/ab_mines/data/"
-    MASK_PATH = DATASET_PATH + f"/ab_mines/masks/"
-
-
-    dsConfig = SegmentationDatasetConfig(
-        ClassNames=["background", "excavation_area"],
-        ClassColors=["lightgray", "darkred"],
-        NullClass="background",
-        MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-        PatchSize=(224, 224),
-        PaddingSize=0,
-        Shuffle=True,
-        Epoch=1,
-        DatasetRootPath=DATASET_PATH,
-        RandomPatch=False,
-        BatchDataRepeatNumber=2,
-        BatchSize=8,
-        DropLastBatch=True
-    )
-
-    print("parent pid", os.getpid())
-    dataset = SpectralSegmentationDataset(dsConfig)
-    customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
-    DATALOADER = DataLoader(dataset, batch_sampler=customBatchSampler, num_workers=0, persistent_workers=False, pin_memory=True)
-
-    print(CustomBatchSampler.BatchRepeatDataSegment)
-    
+    print("Main Process Id:", os.getpid())
 
     for i, (buffer, mask) in enumerate(DATALOADER):
-        print("\n", i, buffer.shape, mask.shape, "\n-----------------\n" )
+        print("\n", f"Batch: {i}", buffer.shape, mask.shape, "\n", "-"*10)
         
 
     #! VisualizeData
