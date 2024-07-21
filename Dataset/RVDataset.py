@@ -133,6 +133,10 @@ class CustomBatchSampler(Sampler):
 
 
     def __next__(self):
+        if len(self.DataSource.ExpiredScenes)==len(self.DataSource):    #TODO Datasource'lar multiprocessing için bölünürse?
+            self.DataSource.ExpiredScenes.clear()
+            raise StopIteration
+
         # Random Patch
         new_indices = list(set(self.Indices)-set(self.DataSource.ExpiredScenes))
     
@@ -199,7 +203,9 @@ class SpectralSegmentationDataset(SegmentationDataset):
             except IndexError as e:
                 print(e)
             self.CheckExpiring(geoDataset)
+        
         print("---")
+
         return data, label
 
 
@@ -215,9 +221,9 @@ class SpectralSegmentationDataset(SegmentationDataset):
         if geoDataset._Expired:
             self.ExpiredScenes+=[geoDataset.Id]
 
-        if len(self.ExpiredScenes)==len(self.DatasetIndexMeta):
-            self.ExpiredScenes.clear()
-            raise StopIteration
+        # if len(self.ExpiredScenes)==self.__len__():
+        #     self.ExpiredScenes.clear()
+        #     raise StopIteration
         # TODO Indexable Verilerin indexlerini de sıfırla
 
 
@@ -387,7 +393,9 @@ if "__main__" == __name__:
 
 
     for i, (buffer, mask) in enumerate(DATALOADER):
-        print("\n", f"Batch: {i}", buffer.shape, mask.shape, "\n", "-"*10)
+        print("\n", "-"*10)
+        print(f"Batch: {i}", buffer.shape, mask.shape)
+        print("-"*10, "\n")
         
 
     #! VisualizeData
