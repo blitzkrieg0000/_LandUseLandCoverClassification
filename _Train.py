@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from DataProcess.Dataset import TRANSFORM_IMAGE, SentinelPatchDataset
+from Dataset.DataTransform import DATA_TRANSFORMS_BY_MODEL
 from model.Resnet50 import CustomResNet50
 from model.Unet import CustomUnet
 import wandb
@@ -67,6 +68,8 @@ def ChangeMaskOrder(mask, classes):
     return new_mask
 
 
+
+
 # =================================================================================================================== #
 #! Load Dataset
 # =================================================================================================================== #
@@ -118,7 +121,7 @@ if "__main__" == __name__:
             inputs = inputs[:, 0:10, :, :]
             inputs = inputs.unsqueeze(1) #! Unet3D
             
-            inputs = TRANSFORM_IMAGE(inputs)
+            inputs = DATA_TRANSFORMS_BY_MODEL["input_transform"](inputs)
             outputs = MODEL(inputs)
             
 

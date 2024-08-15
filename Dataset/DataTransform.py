@@ -2,7 +2,7 @@ import torch
 from torchvision.transforms import v2 as tranformsv2
 
 from Model.Enum import ModelType
-from Tool import ChangeMaskOrder
+from Tool.Base import ChangeMaskOrder
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

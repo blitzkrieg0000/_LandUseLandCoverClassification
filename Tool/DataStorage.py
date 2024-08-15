@@ -33,6 +33,7 @@ def GetIndexDatasetPath(dataset_name):
 
 
 if "__main__" == __name__:
+    os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
     datasetList = ListIndexDatasets()
-    path = GetIndexDatasetPath("MiningArea01")
+    path = GetIndexDatasetPath("LULC_IO_10m") # LULC_IO_10m, MiningArea01
     print(path)

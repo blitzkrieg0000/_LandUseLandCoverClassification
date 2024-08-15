@@ -48,6 +48,7 @@ class SegmentationDatasetConfig(BaseModel):
 
 class SegmentationDataset(Dataset):
     def __init__(self):
+        self.GeoDatasetCache: List[TrackableIterator]
         self.RandomPatch: SegmentationDatasetConfig
         self.ExpiredScenes: List[str]
 
@@ -78,7 +79,7 @@ class TrackableIterator():
         """For Sliding GeoDataset"""
         self.Index += 1
         self.CheckIndex()
-        print(f"Trackable Iterator:-> Patch Index: {self.Index}-%-{self.Index % len(self.Iterator)}")
+        # print(f"Trackable Iterator:-> Patch Index: {self.Index}-%-{self.Index % len(self.Iterator)}")
         return self.Iterator[self.Index % self.__len__()]
 
 
@@ -99,6 +100,7 @@ class TrackableIterator():
         return self.Index
 
 
+
 class CustomBatchSampler(Sampler):
     BatchRepeatDataSegment = None
     def __init__(self, data_source: SegmentationDataset, config: SegmentationDatasetConfig):
@@ -109,17 +111,17 @@ class CustomBatchSampler(Sampler):
         self._DropLast = config.DropLastBatch
         self.Epoch = config.Epoch
         self.Index = -1
+        self.EpochCounter = 0
         self.Indices = list(range(len(self.DataSource)))
-        CustomBatchSampler.BatchRepeatDataSegment = [1]*config.BatchSize
-        CustomBatchSampler.BatchRepeatDataSegment = CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
+        CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
 
 
     @staticmethod
     def RepeatedDataSegmentList(batch_size, batch_data_repeat_number):
         """[1 1 1 1 1 1 1 1], [2 2 2 2], [3 3 2], [8]"""
         chunkSize = torch.clamp(torch.tensor(batch_data_repeat_number), 1, batch_size)
-        chunks = torch.chunk(torch.arange(batch_size), chunkSize)
-        return list(map(len, chunks))
+        chunks = torch.chunk(torch.arange(batch_size), chunkSize) 
+        CustomBatchSampler.BatchRepeatDataSegment = list(map(len, chunks))
 
 
     def __len__(self):
@@ -133,9 +135,18 @@ class CustomBatchSampler(Sampler):
 
 
     def __next__(self):
-        if len(self.DataSource.ExpiredScenes)==len(self.DataSource):    #TODO Datasource'lar multiprocessing için bölünürse?
+        if len(self.DataSource.ExpiredScenes)>=len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
             self.DataSource.ExpiredScenes.clear()
-            raise StopIteration
+            self.EpochCounter += 1
+            # for c in self.DataSource.GeoDatasetCache:
+            #     c._Expired = False
+            #     c.Index = -1
+
+            if self.EpochCounter > self.Epoch:
+                # self.EpochCounter = 0
+                raise StopIteration
+
+              
 
         # Random Patch
         new_indices = list(set(self.Indices)-set(self.DataSource.ExpiredScenes))
@@ -168,7 +179,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
         self.Shuffle = config.Shuffle
         self.RandomPatch = config.RandomPatch
         self.GeoDatasetCache = {}
-        self.DatasetIndexMeta = ReadDatasetFromIndexFile(config.DatasetRootPath)
+        self.DatasetIndexMeta: List[DataSourceMeta] = ReadDatasetFromIndexFile(config.DatasetRootPath)
         # self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
         self.ExpiredScenes = []
         self.start_idx = 0
@@ -184,8 +195,11 @@ class SpectralSegmentationDataset(SegmentationDataset):
         if worker_info:
             print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id}/{worker_info.num_workers} workers")
 
+        # READ SOURCE META
         idx %= len(self.DatasetIndexMeta)
-        _data: DataSourceMeta = self.DatasetIndexMeta[idx % len(self.DatasetIndexMeta)]
+        _data: DataSourceMeta = self.DatasetIndexMeta[idx]
+
+        # READ SCENE AND CACHE
         geoDataset = self.GeoDatasetCache.get(_data.Scene, None)            # TODO State'i tut.
         print(f"SpectralSegmentationDataset:-> index: {idx}, scene: {_data.Scene}, pid: {os.getpid()}")
         if geoDataset is None:
@@ -295,9 +309,8 @@ class SpectralSegmentationDataset(SegmentationDataset):
                     scene = scene,
                     size = (patchX, patchY),
                     stride = 112,
-                    padding = 0                                     #TODO Parameter
+                    padding = 0                                     # TODO Parameter
                 )
-
 
 
 def ShowDatasetViaVisualizer(dataset):
@@ -316,7 +329,7 @@ def ShowRaster(raster):
 
 
 def VisualizeData(dataloader, limit=None):
-    print("\nDataloader Size:", len(DATALOADER))
+    # print("\nDataloader Size:", len(DATALOADER))
     
     fig, axs = plt.subplots(4, 4, figsize=(12, 12))
 
@@ -351,9 +364,10 @@ def custom_collate_fn(batch):
     return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
 
 
-DATASET_PATH = GetIndexDatasetPath("MiningArea01")   #"C:\\Users\\DGH\\source\\repos\\Local\\data\\GIS\\Sentinel2\\MiningArea01" # 
-DATA_PATH = DATASET_PATH + f"/ab_mines/data/"
-MASK_PATH = DATASET_PATH + f"/ab_mines/masks/"
+# DATASET_PATH = GetIndexDatasetPath("MiningArea01")   #"C:\\Users\\DGH\\source\\repos\\Local\\data\\GIS\\Sentinel2\\MiningArea01" # 
+
+os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
+DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
 
 dsConfig = SegmentationDatasetConfig(
     ClassNames=["background", "excavation_area"],
@@ -392,14 +406,14 @@ if "__main__" == __name__:
     )
 
 
-    for i, (buffer, mask) in enumerate(DATALOADER):
-        print("\n", "-"*10)
-        print(f"Batch: {i}", buffer.shape, mask.shape)
-        print("-"*10, "\n")
+    # for i, (buffer, mask) in enumerate(DATALOADER):
+    #     print("\n", "-"*10)
+    #     print(f"Batch: {i}", buffer.shape, mask.shape)
+    #     print("-"*10, "\n")
         
 
     #! VisualizeData
-    # VisualizeData(DATALOADER)
+    VisualizeData(DATALOADER)
     
     
 
