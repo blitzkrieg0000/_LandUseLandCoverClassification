@@ -429,15 +429,15 @@ DATALOADER = DataLoader(
 if "__main__" == __name__:
     print("Main Process Id:", os.getpid())
 
-    for i, (inputs, targets) in enumerate(DATALOADER):
-        inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-        print("\n", "-"*10)
-        print(f"Batch: {i}", inputs.shape, targets.shape)
-        print("-"*10, "\n")
-        print(f"Batch: {i}")
+    # for i, (inputs, targets) in enumerate(DATALOADER):
+    #     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+    #     print("\n", "-"*10)
+    #     print(f"Batch: {i}", inputs.shape, targets.shape)
+    #     print("-"*10, "\n")
+    #     print(f"Batch: {i}")
 
     #! VisualizeData
-    # VisualizeData(DATALOADER)
+    VisualizeData(DATALOADER)
     
     
 

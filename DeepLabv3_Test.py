@@ -102,7 +102,7 @@ print(model)
 # =================================================================================================================== #
 #! Load Model
 # ================================================================================================================== #
-model.load_state_dict(torch.load("./Weight/deeplabv3_v1.729.pth"))
+model.load_state_dict(torch.load("./Weight/deeplabv3_v1_212_final.pth"))
 model = model.to(DEVICE)
 model = model.eval()
 

@@ -29,7 +29,7 @@ LEARNING_RATE = 0.001
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 16
 PATCH_SIZE = 64
-_ActivateWB = False
+_ActivateWB = True
 
 # =================================================================================================================== #
 #! DATASET
@@ -47,7 +47,7 @@ dsConfig = SegmentationDatasetConfig(
     Epoch=EPOCHS,
     DatasetRootPath=DATASET_PATH,
     RandomPatch=False,
-    BatchDataRepeatNumber=2,
+    BatchDataRepeatNumber=1,
     BatchSize=BATCH_SIZE,
     DropLastBatch=True
 )
@@ -117,6 +117,7 @@ if _ActivateWB:
 # =================================================================================================================== #
 #! MODEL
 # =================================================================================================================== #
+# TODO conv1 Kernel 7x7 yap
 class DeepLabv3(torch.nn.Module):
     def __init__(self, input_channels=12, segmentation_classes=9, freeze_backbone=False):
         super(DeepLabv3, self).__init__()
@@ -128,7 +129,7 @@ class DeepLabv3(torch.nn.Module):
         self.model.backbone.conv1 = torch.nn.Conv2d(input_channels, 64, kernel_size=(3, 3), stride=1, padding=(3, 3), bias=False)
         self.model.classifier[4] = torch.nn.Conv2d(256, segmentation_classes, kernel_size=(1, 1), stride=(1, 1))
         self.model.aux_classifier = None
-        # self.model.classifier.add_module("softmax", torch.nn.Softmax(dim=1))
+        self.model.classifier.add_module("softmax", torch.nn.Softmax(dim=1))
 
     def forward(self, x):
         return self.model(x)
@@ -180,9 +181,9 @@ if "__main__" == __name__:
 
         #! Mask To One Hot
         # One-hot kodlamalı tensor oluştur
-        targets = targets.unsqueeze(1)
-        one_hot_mask = torch.zeros((targets.size(0), num_classes, targets.size(2), targets.size(3)), device=DEVICE)
-        one_hot_mask.scatter_(1, targets, 1) # Sınıf indekslerini one-hot kodlamalı tensor haline getir
+        # targets = targets.unsqueeze(1)
+        # one_hot_mask = torch.zeros((targets.size(0), num_classes, targets.size(2), targets.size(3)), device=DEVICE)
+        # one_hot_mask.scatter_(1, targets, 1) # Sınıf indekslerini one-hot kodlamalı tensor haline getir
         
         optimizer.zero_grad()
         
@@ -191,8 +192,8 @@ if "__main__" == __name__:
         # Forward Pass
         outputs = model(inputs)["out"]
         
-        # loss = criterion(outputs, one_hot_mask)
-        loss = CombinedLoss(outputs, one_hot_mask)
+        loss = criterion(outputs, targets)
+        # loss = CombinedLoss(outputs, one_hot_mask)
 
         # Backward Pass
         loss.backward()
