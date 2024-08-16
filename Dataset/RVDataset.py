@@ -3,13 +3,12 @@ from __future__ import annotations
 import os
 import sys
 
-import torch
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+import torch
 import random
 from functools import reduce
-from typing import Annotated, List, Tuple
+from typing import Annotated, List, Set, Tuple
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -27,8 +26,9 @@ from Tool.DataStorage import GetIndexDatasetPath
 from Tool.Util import (CrateDatasetIndexFile, DataSourceMeta, FilePath,
                        ReadDatasetFromIndexFile)
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#%%----------------------------------------------------------------------------------------------------------------
+
 class SegmentationDatasetConfig(BaseModel):
     ClassNames: Annotated[List[str], "Class Names"]
     ClassColors: Annotated[List[str], "Class Colors"]
@@ -50,17 +50,19 @@ class SegmentationDataset(Dataset):
     def __init__(self):
         self.GeoDatasetCache: List[TrackableIterator]
         self.RandomPatch: SegmentationDatasetConfig
-        self.ExpiredScenes: List[str]
+        self.ExpiredScenes: Set[str]
 
 
 
 class TrackableIterator():
-    def __init__(self, iterator, id, cycle=False):
+    """GeoSlider veya Random GeoIterator için indis takibi yapan bir sınıftır."""
+    def __init__(self, iterator, id, cycle=False, margin=None):
         self.Id = id
         self.Index = -1
         self._Expired = False
         self._Cycle = cycle
         self.Iterator = iterator
+        self.margin = margin or max(CustomBatchSampler.BatchRepeatDataSegment)
 
     def __iter__(self):
         return self
@@ -83,17 +85,19 @@ class TrackableIterator():
         return self.Iterator[self.Index % self.__len__()]
 
 
+    @property
+    def Margin(self):
+        if 0 != self.__len__() % self.margin:
+            return self.margin - self.__len__() % self.margin
+        else:
+            return 0
+
+
     def CheckIndex(self):
         if (self._Expired and not self._Cycle):
             raise IndexError
         
-        margin = max(CustomBatchSampler.BatchRepeatDataSegment)
-        if 0 != self.__len__() % margin:
-            margin = margin - self.__len__() % margin
-        else:
-            margin = 0
-
-        self._Expired = self.Index >= self.__len__() + margin - 1    # TODO Eğer alınamayacak kadar window varsa drop_last uygula veya 1 kerelik cycle yap
+        self._Expired = self.Index >= self.__len__() + self.Margin - 1    # TODO Eğer alınamayacak kadar window varsa drop_last uygula veya 1 kerelik cycle yap
 
 
     def GetIndex(self):
@@ -142,14 +146,13 @@ class CustomBatchSampler(Sampler):
             #     c._Expired = False
             #     c.Index = -1
 
-            if self.EpochCounter > self.Epoch:
+            if self.EpochCounter >= self.Epoch:
                 # self.EpochCounter = 0
                 raise StopIteration
 
-              
 
         # Random Patch
-        new_indices = list(set(self.Indices)-set(self.DataSource.ExpiredScenes))
+        new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes)
     
         choices = np.random.choice(
             new_indices,
@@ -167,7 +170,6 @@ class CustomBatchSampler(Sampler):
         return np.repeat(choices, CustomBatchSampler.BatchRepeatDataSegment)  
 
 
-
 class SpectralSegmentationDataset(SegmentationDataset):
     def __init__(self, config: SegmentationDatasetConfig):
         super().__init__()
@@ -181,7 +183,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
         self.GeoDatasetCache = {}
         self.DatasetIndexMeta: List[DataSourceMeta] = ReadDatasetFromIndexFile(config.DatasetRootPath)
         # self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
-        self.ExpiredScenes = []
+        self.ExpiredScenes = set()
         self.start_idx = 0
         self.end_idx = -1
 
@@ -233,7 +235,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
 
     def CheckExpiring(self, geoDataset:TrackableIterator):
         if geoDataset._Expired:
-            self.ExpiredScenes+=[geoDataset.Id]
+            self.ExpiredScenes.add(geoDataset.Id)
 
         # if len(self.ExpiredScenes)==self.__len__():
         #     self.ExpiredScenes.clear()
@@ -364,8 +366,6 @@ def custom_collate_fn(batch):
     return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
 
 
-# DATASET_PATH = GetIndexDatasetPath("MiningArea01")   #"C:\\Users\\DGH\\source\\repos\\Local\\data\\GIS\\Sentinel2\\MiningArea01" # 
-
 os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
 DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
 
@@ -374,10 +374,10 @@ dsConfig = SegmentationDatasetConfig(
     ClassColors=["lightgray", "darkred"],
     NullClass="background",
     MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-    PatchSize=(224, 224),
+    PatchSize=(64, 64),
     PaddingSize=0,
     Shuffle=True,
-    Epoch=1,
+    Epoch=2,
     DatasetRootPath=DATASET_PATH,
     RandomPatch=False,
     BatchDataRepeatNumber=2,
@@ -391,29 +391,28 @@ dataset = SpectralSegmentationDataset(dsConfig)
 customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
 
 
+DATALOADER = DataLoader(
+    dataset,
+    batch_sampler=customBatchSampler,
+    num_workers=0,
+    persistent_workers=False, 
+    pin_memory=True,
+    collate_fn=custom_collate_fn,
+    # multiprocessing_context = torch.multiprocessing.get_context("spawn")
+)
 
 if "__main__" == __name__:
     print("Main Process Id:", os.getpid())
 
-    DATALOADER = DataLoader(
-        dataset,
-        batch_sampler=customBatchSampler,
-        num_workers=0,
-        persistent_workers=False, 
-        pin_memory=True,
-        collate_fn=custom_collate_fn,
-        # multiprocessing_context = torch.multiprocessing.get_context("spawn")
-    )
-
-
-    # for i, (buffer, mask) in enumerate(DATALOADER):
-    #     print("\n", "-"*10)
-    #     print(f"Batch: {i}", buffer.shape, mask.shape)
-    #     print("-"*10, "\n")
-        
+    for i, (inputs, targets) in enumerate(DATALOADER):
+        inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+        print("\n", "-"*10)
+        print(f"Batch: {i}", inputs.shape, targets.shape)
+        print("-"*10, "\n")
+        print(f"Batch: {i}")
 
     #! VisualizeData
-    VisualizeData(DATALOADER)
+    # VisualizeData(DATALOADER)
     
     
 

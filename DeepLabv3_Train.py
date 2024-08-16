@@ -13,7 +13,7 @@ from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights, deeplab
 from torchvision.transforms import v2 as tranformsv2
 
 from Dataset.RVDataset import (CustomBatchSampler, SegmentationDatasetConfig,
-                               SpectralSegmentationDataset, custom_collate_fn)
+                               SpectralSegmentationDataset, VisualizeData, custom_collate_fn)
 from Tool.Base import ChangeMaskOrder
 from Tool.DataStorage import GetIndexDatasetPath
 
@@ -29,8 +29,6 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 8
 EPOCHS = 50
 patch_size = 64
-
-
 
 
 # =================================================================================================================== #
@@ -68,7 +66,6 @@ DATALOADER = DataLoader(
     # multiprocessing_context = torch.multiprocessing.get_context("spawn")
 )
 
-
 class NormalizeSentinel2Transform(object):
     def __call__(self, inputs: torch.Tensor):
         #? Sentinel-2 verilerini [0, 1] aralığına normalize etmek için 10000'e bölme işlemi yapılır
@@ -77,8 +74,14 @@ class NormalizeSentinel2Transform(object):
 
 TRANSFORM_IMAGE = tranformsv2.Compose([NormalizeSentinel2Transform()])
 
+
 #! VisualizeData
 # VisualizeData(DATALOADER)
+for i, (inputs, targets) in enumerate(DATALOADER):
+    inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+    print("\n", "-"*10)
+    print(f"Batch: {i}", inputs.shape, targets.shape)
+    print("-"*10, "\n")
 
 
 # =================================================================================================================== #
@@ -87,6 +90,7 @@ TRANSFORM_IMAGE = tranformsv2.Compose([NormalizeSentinel2Transform()])
 def ReadWandbKeyFromFile() -> str:
     with open("./data/asset/config/wandb/.apikey", "r") as f:
         return f.read()
+
 
 def InitializeWandb():
     """ Weights & Biases """
@@ -105,8 +109,8 @@ def InitializeWandb():
         group="Train_CustomUnet",
         tags=["Cukurova_IO_LULC", "DeepLabv3", "Train"],
     )
-InitializeWandb()
 
+# InitializeWandb()
 
 
 # =================================================================================================================== #
@@ -141,6 +145,7 @@ criterion = torch.nn.BCEWithLogitsLoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 # Wandb Watch
 # wandb.watch(MODEL, log="all")
+
 
 
 if "__main__" == __name__:
@@ -179,22 +184,27 @@ if "__main__" == __name__:
         accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / patch_size**2 /inputs.size(0))
         totalAccuracy += accuracy.item()
         print(f"Epoch {step+1}/{0}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy.item()}")
-        try:
-            wandb.log({
-                "epoch": step,
-                "train_loss": loss.item()/BATCH_SIZE,
-                "train_accuracy": accuracy
-            })
-        except Exception as e:
-            print(e)
+        # try:
+        #     wandb.log({
+        #         "epoch": step,
+        #         "train_loss": loss.item()/BATCH_SIZE,
+        #         "train_accuracy": accuracy
+        #     })
+        # except Exception as e:
+        #     print(e)
 
-        print(f"Step: {step}, Epoch Accuracy: {totalAccuracy/(step+1)}")
+        print(f"Step: {step+1}, Epoch Accuracy: {totalAccuracy/(step+1)}")
 
-        if step % 100 == 0:
-            torch.save(model.state_dict(), f"./Weight/deeplabv3_v1.{random.randint(0, 1000)}.pth")
-            wandb.save(f"./data/wandb/weight/deeplabv3_v1.{random.randint(0, 1000)}.pth")
+        # if step % 100 == 0:
+        #     torch.save(model.state_dict(), f"./Weight/deeplabv3_v1.{random.randint(0, 1000)}.pth")
+            # wandb.save(f"./data/wandb/weight/deeplabv3_v1.{random.randint(0, 1000)}.pth")
 
 
-    torch.save(model.state_dict(), "./Weight/deeplabv3_v1_final.pth")
-    wandb.save(".data/wandb/weight/deeplabv3_final.pth")
-    wandb.finish()
+    # torch.save(model.state_dict(), "./Weight/deeplabv3_v1_final.pth")
+    # wandb.save(".data/wandb/weight/deeplabv3_final.pth")
+    # wandb.finish()
+
+
+
+
+
