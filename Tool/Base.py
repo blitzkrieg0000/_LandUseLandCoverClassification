@@ -1,3 +1,4 @@
+from typing import List
 import numpy as np
 import torch
 
@@ -41,8 +42,13 @@ class EarlyStopping():
 # =================================================================================================================== #
 #! Functions
 # =================================================================================================================== #
-def ChangeMaskOrder(mask, classes):
-    mapping = {x:i for i,x in enumerate(classes)}
+def ChangeMaskOrder(mask: torch.Tensor, classes: torch.Tensor):
+    extra_classes = classes.unique()
+    others = extra_classes[~torch.isin(extra_classes, classes)]
+    other_maps = {x:0 for x in others}
+    mapping = {x:i for i, x in enumerate(classes)}
+    mapping.update(other_maps)
+
     new_mask = mask.clone()
     for old, new in mapping.items():
         new_mask[mask == old] = new

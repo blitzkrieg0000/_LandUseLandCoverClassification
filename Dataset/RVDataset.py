@@ -43,7 +43,7 @@ class SegmentationDatasetConfig(BaseModel):
     BatchDataRepeatNumber:Annotated[int, "Batch Dataset Repeat Number"]
     BatchSize:Annotated[int, "Batch Size"]
     DropLastBatch:Annotated[bool, "Drop Last Batch"]=True
-
+    StrideSize:Annotated[int, "Sliding Window Stride Size"]=112
 
 
 class SegmentationDataset(Dataset):
@@ -176,6 +176,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
         self.Config = config
         self.ClassConfig = ClassConfig(names=config.ClassNames, colors=config.ClassColors, null_class=config.NullClass)
         self.MaxWindowsPerScene = config.MaxWindowsPerScene
+        self.StrideSize = config.StrideSize
         self.PatchSize = config.PatchSize
         self.PaddingSize = config.PaddingSize
         self.Shuffle = config.Shuffle
@@ -236,6 +237,9 @@ class SpectralSegmentationDataset(SegmentationDataset):
     def CheckExpiring(self, geoDataset:TrackableIterator):
         if geoDataset._Expired:
             self.ExpiredScenes.add(geoDataset.Id)
+            # Reset Index
+            geoDataset.Index = -1
+            geoDataset._Expired = False
 
         # if len(self.ExpiredScenes)==self.__len__():
         #     self.ExpiredScenes.clear()
@@ -310,7 +314,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
             return SemanticSegmentationSlidingWindowGeoDataset(
                     scene = scene,
                     size = (patchX, patchY),
-                    stride = 112,
+                    stride = self.StrideSize, # 112
                     padding = 0                                     # TODO Parameter
                 )
 
@@ -350,6 +354,27 @@ def VisualizeData(dataloader, limit=None):
         
         if limit is not None and i >= limit:
             break
+
+    plt.tight_layout()
+    plt.show()
+
+
+def VisualizePrediction(buffer, mask, predicted):
+    # print("\nDataloader Size:", len(DATALOADER))
+    
+    fig, axs = plt.subplots(4, 4, figsize=(12, 12))
+
+    for bn in range(buffer.shape[0]):
+        for i in range(16):
+            axs[i%4, i//4].axis("off")
+            if i<buffer.shape[1]:
+                axs[i%4, i//4].imshow(buffer[bn, i].cpu().numpy(), cmap="viridis")
+                axs[i%4, i//4].set_title(f"Band {i+1}")
+        
+        axs[2, 3].imshow(mask[bn].cpu().numpy(), cmap="viridis")
+        axs[2, 3].set_title("Ground Truth")
+        axs[3, 3].imshow(predicted[bn].cpu().numpy(), cmap="viridis")
+        axs[3, 3].text(0, 0, "Predicted", fontsize=12, color="blue", weight="bold")
 
     plt.tight_layout()
     plt.show()
