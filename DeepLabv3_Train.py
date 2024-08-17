@@ -21,6 +21,9 @@ from Tool.Base import ChangeMaskOrder
 from Tool.DataStorage import GetIndexDatasetPath
 from torch.functional import F
 from torch import nn
+from PIL import Image
+import numpy as np
+
 
 # =================================================================================================================== #
 #! PARAMS
@@ -34,7 +37,7 @@ PATCH_SIZE = 120   # Window Size
 STRIDE_SIZE = 64   # Sliding Window
 num_channels = 10  # Multispektral kanal sayısı
 num_classes = 33    # Maskedeki sınıf sayısı
-classes =  torch.range(1, num_classes) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
+classes = torch.arange(1, num_classes + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
 _ActivateWB = True
 
 
@@ -151,7 +154,7 @@ model.train()
 
 
 ##! --------------- Load Weights --------------- !##
-model.load_state_dict(torch.load("./Weight/deeplabv3_v1_980_4950.pth"))
+model.load_state_dict(torch.load("Weight/deeplabv3_v1_196_500_17.08.2024_21.26.16.pth"))
 
 print(model)
 
@@ -240,11 +243,60 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 
 random_number = random.randint(0, 1000)
 
+
+
 if "__main__" == __name__:
+
+
+    land_cover_classes = {
+        0: "Continuous urban fabric",
+        1: "Discontinuous urban fabric",
+        2: "Industrial or commercial units",
+        3: "Road and rail networks and associated land",
+        4: "Port areas",
+        5: "Airports",
+        6: "Mineral extraction sites",
+        7: "Dump sites",
+        8: "Construction sites",
+        9: "Green urban areas",
+        10: "Sport and leisure facilities",
+        11: "Non-irrigated arable land",
+        12: "Vineyards",
+        13: "Fruit trees and berry plantations",
+        14: "Pastures",
+        15: "Broad-leaved forest",
+        16: "Coniferous forest",
+        17: "Mixed forest",
+        18: "Natural grasslands",
+        19: "Moors and heathland",
+        20: "Transitional woodland/shrub",
+        21: "Beaches, dunes, sands",
+        22: "Bare rock",
+        23: "Sparsely vegetated areas",
+        24: "Inland marshes",
+        25: "Peat bogs",
+        26: "Salt marshes",
+        27: "Intertidal flats",
+        28: "Water courses",
+        29: "Water bodies",
+        30: "Coastal lagoons",
+        31: "Estuaries",
+        32: "Sea and ocean"
+    }
+
+
+    def WBMask(bg_img, pred_mask, true_mask):
+        return wandb.Image(bg_img, masks={
+            "predictions" : {"mask_data" : pred_mask, "class_labels" : land_cover_classes},
+            "ground_truth" : {"mask_data" : true_mask, "class_labels" : land_cover_classes}
+        })
+
+
     # =================================================================================================================== #
     #! Train
     # =================================================================================================================== #
     totalAccuracy = 0
+    result_images = []
     for step, (inputs, targets) in enumerate(DATALOADER):
         inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 
@@ -275,7 +327,9 @@ if "__main__" == __name__:
         with torch.no_grad():
             class_indices = torch.argmax(outputs, dim=1)
             targets = targets.squeeze(1)
-            accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / PATCH_SIZE**2 /inputs.size(0))
+            # accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / PATCH_SIZE**2 /inputs.size(0))
+            accuracy = 100 * (class_indices == targets).float().mean()
+
             totalAccuracy += accuracy.item()
             print(f"Epoch {step+1}/{0}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy.item()}")
             if _ActivateWB:
@@ -285,16 +339,32 @@ if "__main__" == __name__:
                         "train_loss": loss.item()/BATCH_SIZE,
                         "train_accuracy": accuracy
                     })
+                    inputs: torch.Tensor
+                    if (1+step) % 5 == 0:
+                        image:np.ndarray = inputs[0][1:4, :, :].permute(1, 2, 0).cpu().numpy()
+                        image = (image - image.min()) / (image.max() - image.min())
+                        wb_image = WBMask(
+                            image*255,
+                            class_indices[0].cpu().numpy(),
+                            targets[0].cpu().numpy()
+                        )
+                        result_images+=[wb_image]
+
                 except Exception as e:
                     print(e)
 
             print(f"Step: {step+1}, Epoch Accuracy: {totalAccuracy/(step+1)}")
 
             if step % 500 == 0:
-                date_time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                date_time_now = time.strftime("%d.%m.%Y_%H.%M.%S", time.localtime())
                 torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
                 if _ActivateWB:
                     wandb.save(f"./data/wandb/weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
+
+            if (1+step) % 10 == 0:
+                wandb.log({"Segmentation Visualization": result_images})
+                result_images.clear()
+
 
 
     torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_final.pth")

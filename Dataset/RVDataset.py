@@ -424,7 +424,8 @@ def VisualizePrediction(buffer, mask, predicted):
         for i in range(16):
             axs[i%4, i//4].axis("off")
             if i<buffer.shape[1]:
-                axs[i%4, i//4].imshow(buffer[bn, i].cpu().numpy(), cmap="viridis")
+                image = buffer[bn, i].cpu().numpy()
+                axs[i%4, i//4].imshow(image, cmap="viridis")
                 axs[i%4, i//4].set_title(f"Band {i+1}")
         
         axs[2, 3].imshow(mask[bn].cpu().numpy(), cmap="viridis")
