@@ -86,10 +86,10 @@ class DeepLabv3(torch.nn.Module):
         for param in self.model.parameters():
             param.requires_grad = not freeze_backbone
 
-        self.model.backbone.conv1 = torch.nn.Conv2d(input_channels, 64, kernel_size=(3, 3), stride=1, padding=(3, 3), bias=False)
+        self.model.backbone.conv1 = torch.nn.Conv2d(input_channels, 64, kernel_size=(7, 7), stride=1, padding=(3, 3), bias=False)
         self.model.classifier[4] = torch.nn.Conv2d(256, segmentation_classes, kernel_size=(1, 1), stride=(1, 1))
         self.model.aux_classifier = None
-    
+        self.model.classifier.add_module("softmax", torch.nn.Softmax(dim=1))
 
     def forward(self, x):
         return self.model(x)
@@ -102,7 +102,7 @@ print(model)
 # =================================================================================================================== #
 #! Load Model
 # ================================================================================================================== #
-model.load_state_dict(torch.load("./Weight/deeplabv3_v1_212_final.pth"))
+model.load_state_dict(torch.load("./Weight/deeplabv3_v1_690_5550.pth"))
 model = model.to(DEVICE)
 model = model.eval()
 

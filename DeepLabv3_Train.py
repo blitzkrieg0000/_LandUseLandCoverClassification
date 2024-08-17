@@ -16,20 +16,23 @@ from Dataset.RVDataset import (CustomBatchSampler, SegmentationDatasetConfig,
                                SpectralSegmentationDataset, VisualizeData, custom_collate_fn)
 from Tool.Base import ChangeMaskOrder
 from Tool.DataStorage import GetIndexDatasetPath
-
+from torch.functional import F
+from torch import nn
 
 # =================================================================================================================== #
 #! PARAMS
 # =================================================================================================================== #
-EPOCHS = 35
-num_channels = 13  # Multispektral kanal sayısı
-num_classes = 9    # Maskedeki sınıf sayısı
-classes = torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11])
-LEARNING_RATE = 0.001
+EPOCHS = 50
+LEARNING_RATE = 1e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 16
-PATCH_SIZE = 64
+PATCH_SIZE = 128   # Window Size
+STRIDE_SIZE = 64   # Sliding Window
+num_channels = 13  # Multispektral kanal sayısı
+num_classes = 9    # Maskedeki sınıf sayısı
+classes = torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
 _ActivateWB = True
+
 
 # =================================================================================================================== #
 #! DATASET
@@ -49,7 +52,8 @@ dsConfig = SegmentationDatasetConfig(
     RandomPatch=False,
     BatchDataRepeatNumber=1,
     BatchSize=BATCH_SIZE,
-    DropLastBatch=True
+    DropLastBatch=True,
+    StrideSize=STRIDE_SIZE
 )
 
 dataset = SpectralSegmentationDataset(dsConfig)
@@ -117,19 +121,18 @@ if _ActivateWB:
 # =================================================================================================================== #
 #! MODEL
 # =================================================================================================================== #
-# TODO conv1 Kernel 7x7 yap
 class DeepLabv3(torch.nn.Module):
     def __init__(self, input_channels=12, segmentation_classes=9, freeze_backbone=False):
         super(DeepLabv3, self).__init__()
-        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1)
+        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.DEFAULT)
 
         for param in self.model.parameters():
             param.requires_grad = not freeze_backbone
 
-        self.model.backbone.conv1 = torch.nn.Conv2d(input_channels, 64, kernel_size=(3, 3), stride=1, padding=(3, 3), bias=False)
+        self.model.backbone.conv1 = torch.nn.Conv2d(input_channels, 64, kernel_size=(7, 7), stride=1, padding=(3, 3), bias=False)
         self.model.classifier[4] = torch.nn.Conv2d(256, segmentation_classes, kernel_size=(1, 1), stride=(1, 1))
         self.model.aux_classifier = None
-        self.model.classifier.add_module("softmax", torch.nn.Softmax(dim=1))
+        # self.model.classifier.add_module("softmax", torch.nn.Softmax(dim=1))
 
     def forward(self, x):
         return self.model(x)
@@ -144,24 +147,81 @@ print(model)
 # =================================================================================================================== #
 #! Compile Model
 # =================================================================================================================== #
-def CrossEntropyloss(pred, target):
-    log_prob = torch.nn.functional.log_softmax(pred, dim=1)
-    summ = -(target * log_prob).sum(dim=1)
-    return summ.mean()
+# def CrossEntropyloss(pred, target):
+#     log_prob = torch.nn.functional.log_softmax(pred, dim=1)
+#     summ = -(target * log_prob).sum(dim=1)
+#     return summ.mean()
 
 
-def DiceLoss(pred, target, smooth=1.0):
-    pred = torch.sigmoid(pred)
-    intersection = (pred * target).sum(dim=(2, 3))
-    dice = (2.0 * intersection + smooth) / (pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3)) + smooth)
-    return 1 - dice.mean()
+# def DiceLoss(pred, target, smooth=1.0):
+#     pred = torch.sigmoid(pred)
+#     intersection = (pred * target).sum(dim=(2, 3))
+#     dice = (2.0 * intersection + smooth) / (pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3)) + smooth)
+#     return 1 - dice.mean()
 
 
-def CombinedLoss(pred, target):
-    return DiceLoss(pred, target) + CrossEntropyloss(pred, target)
+# def CombinedLoss(pred, target):
+#     return DiceLoss(pred, target) + CrossEntropyloss(pred, target)
 
 
-criterion = torch.nn.CrossEntropyLoss()
+# Focal Loss
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, alpha=None, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        ce_loss = F.cross_entropy(inputs, targets, reduction="none")
+        pt = torch.exp(-ce_loss)  # pt = exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.alpha is not None:
+            alpha = self.alpha[targets]
+            focal_loss = alpha * focal_loss
+
+        if self.reduction == "mean":
+            return focal_loss.mean()
+        elif self.reduction == "sum":
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
+# Dice Loss
+class DiceLoss(nn.Module):
+    def __init__(self, smooth=1.0, reduction="mean"):
+        super(DiceLoss, self).__init__()
+        self.smooth = smooth
+        self.reduction = reduction
+
+    def forward(self, inputs, targets):
+        # inputs: BATCHx9x128x128
+        # targets: BATCHx128x128 (her piksel için sınıf etiketleri)
+
+        inputs = F.softmax(inputs, dim=1)  # BATCHx9x128x128
+        targets_one_hot = F.one_hot(targets, num_classes=inputs.shape[1])  # BATCHx128x128x9
+        targets_one_hot = targets_one_hot.permute(0, 3, 1, 2).float()  # BATCHx9x128x128
+
+        intersection = (inputs * targets_one_hot).sum(dim=(2, 3))
+        union = inputs.sum(dim=(2, 3)) + targets_one_hot.sum(dim=(2, 3))
+
+        dice_score = (2.0 * intersection + self.smooth) / (union + self.smooth)
+        dice_loss = 1 - dice_score
+
+        if self.reduction == "mean":
+            return dice_loss.mean()
+        elif self.reduction == "sum":
+            return dice_loss.sum()
+        else:
+            return dice_loss
+
+
+dice_loss_fn = DiceLoss()
+# focal_loss_fn = FocalLoss(gamma=2.0)
+# criterion = torch.nn.CrossEntropyLoss()
+
 optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 # Wandb Watch
 # wandb.watch(MODEL, log="all")
@@ -192,8 +252,8 @@ if "__main__" == __name__:
         # Forward Pass
         outputs = model(inputs)["out"]
         
-        loss = criterion(outputs, targets)
-        # loss = CombinedLoss(outputs, one_hot_mask)
+        # Loss
+        loss = dice_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
 
         # Backward Pass
         loss.backward()

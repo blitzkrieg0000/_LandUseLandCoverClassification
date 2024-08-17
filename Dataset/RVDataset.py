@@ -44,7 +44,7 @@ class SegmentationDatasetConfig(BaseModel):
     BatchSize:Annotated[int, "Batch Size"]
     DropLastBatch:Annotated[bool, "Drop Last Batch"]=True
     StrideSize:Annotated[int, "Sliding Window Stride Size"]=112
-
+    ChannelOrder:Annotated[List[int], "Channel Order"]=None
 
 class SegmentationDataset(Dataset):
     def __init__(self):
@@ -264,19 +264,25 @@ class SpectralSegmentationDataset(SegmentationDataset):
 
 
     def ReadRaster(self, file_path=List[FilePath], allow_streaming=False, raster_transformers=[], channel_order=None, bbox=None):
-        return [
-            RasterioSource(
-            fp.Path,
-            allow_streaming=allow_streaming,
-            raster_transformers=raster_transformers,
-            channel_order=channel_order,
-            bbox=bbox
-        ) for fp in file_path]
+        rasters = []
+        for fp in file_path:
+            raster = RasterioSource(
+                        fp.Path,
+                        allow_streaming=allow_streaming,
+                        raster_transformers=raster_transformers,
+                        channel_order=channel_order,
+                        bbox=bbox
+                    )
+            
+            
+
+            rasters+=[raster]
+        return rasters
 
 
     def LoadData(self, _data: DataSourceMeta):
         # Read Raster
-        bands = self.ReadRaster(_data.DataPaths)
+        bands = self.ReadRaster(_data.DataPaths, channel_order=self.Config.ChannelOrder)
         # TODO Label tipine göre (geoJson, shapefile) okuma yapılacak (şuan labellar birer TIF dosyası ve maske şeklinde)
         masks = self.ReadRaster(_data.LabelPaths)
 
@@ -407,7 +413,8 @@ dsConfig = SegmentationDatasetConfig(
     RandomPatch=False,
     BatchDataRepeatNumber=2,
     BatchSize=8,
-    DropLastBatch=True
+    DropLastBatch=True,
+    ChannelOrder=[1,2,3,7]
 )
 
 
