@@ -58,7 +58,7 @@ class SegmentationDataset(Dataset):
 
 
 
-class LimitedCache:
+class LimitedCache():
     def __init__(self, max_size_mb: int):
         self.cache = {}
         self.order = deque()
@@ -66,7 +66,6 @@ class LimitedCache:
         self.current_size = 0
 
     def __GetSize(self, item) -> int:
-        """ Verinin bellek boyutunu hesaplar. Bayt olarak döndürür."""
         return sys.getsizeof(item)
     
     def Add(self, key, value):
@@ -78,12 +77,12 @@ class LimitedCache:
                 # Eğer deque boşsa, çık
                 break
 
-            # En eski anahtar-değer çiftini sil
+            # En eski key-value çiftini sil
             oldest_key = self.order.popleft()
             oldest_value = self.cache.pop(oldest_key)
             self.current_size -= (self.__GetSize(oldest_key) + self.__GetSize(oldest_value))
 
-        # Yeni anahtar-değer çiftini ekle
+        # Yeni key-value çiftini ekle
         self.cache[key] = value
         self.order.append(key)
         self.current_size += item_size

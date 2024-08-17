@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 os.environ["DATA_INDEX_FILE"] = "data/dataset/.index"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
@@ -28,6 +29,7 @@ EPOCHS = 50
 LEARNING_RATE = 1e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 16
+BATCH_CHUNK_NUMBER = BATCH_SIZE
 PATCH_SIZE = 120   # Window Size
 STRIDE_SIZE = 64   # Sliding Window
 num_channels = 10  # Multispektral kanal sayısı
@@ -56,7 +58,7 @@ dsConfig = SegmentationDatasetConfig(
     BatchSize=BATCH_SIZE,
     DropLastBatch=True,
     StrideSize=STRIDE_SIZE,
-    BatchDataChunkNumber=8,
+    BatchDataChunkNumber=BATCH_CHUNK_NUMBER,
     # ChannelOrder=[1,2,3,7],
     DataFilter=[".*_10m", ".*_20m", ".*_IR"]
 )
@@ -146,6 +148,11 @@ class DeepLabv3(torch.nn.Module):
 model = DeepLabv3(input_channels=num_channels, segmentation_classes=num_classes)
 model = model.to(DEVICE)
 model.train()
+
+
+##! --------------- Load Weights --------------- !##
+model.load_state_dict(torch.load("./Weight/deeplabv3_v1_980_4950.pth"))
+
 print(model)
 
 
@@ -230,8 +237,8 @@ dice_loss_fn = DiceLoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 # Wandb Watch
 # wandb.watch(MODEL, log="all")
-random_number = random.randint(0, 1000)
 
+random_number = random.randint(0, 1000)
 
 if "__main__" == __name__:
     # =================================================================================================================== #
@@ -283,15 +290,17 @@ if "__main__" == __name__:
 
             print(f"Step: {step+1}, Epoch Accuracy: {totalAccuracy/(step+1)}")
 
-            if step % 150 == 0:
-                torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_{step}.pth")
+            if step % 500 == 0:
+                date_time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+                torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
                 if _ActivateWB:
-                    wandb.save(f"./data/wandb/weight/deeplabv3_v1_{random_number}_{step}.pth")
+                    wandb.save(f"./data/wandb/weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
 
 
     torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_final.pth")
     if _ActivateWB:
-        wandb.save(f".data/wandb/weight/deeplabv3_{random_number}_final.pth")
+        date_time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        wandb.save(f".data/wandb/weight/deeplabv3_{random_number}_{date_time_now}_final.pth")
         wandb.finish()
 
 
