@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -40,11 +41,13 @@ class SegmentationDatasetConfig(BaseModel):
     Shuffle:Annotated[bool, "Shuffle"]  
     Epoch:Annotated[int, "Epoch"]=None
     RandomPatch:Annotated[bool, "Random Patch"]=True
-    BatchDataRepeatNumber:Annotated[int, "Batch Dataset Repeat Number"]
+    BatchDataChunkNumber:Annotated[int, "Batch Dataset Repeat Number"]
     BatchSize:Annotated[int, "Batch Size"]
     DropLastBatch:Annotated[bool, "Drop Last Batch"]=True
     StrideSize:Annotated[int, "Sliding Window Stride Size"]=112
     ChannelOrder:Annotated[List[int], "Channel Order"]=None
+    DataFilter:Annotated[List[str], "Data Filter"]=None
+
 
 class SegmentationDataset(Dataset):
     def __init__(self):
@@ -88,7 +91,7 @@ class TrackableIterator():
     @property
     def Margin(self):
         if 0 != self.__len__() % self.margin:
-            return self.margin - self.__len__() % self.margin
+            return self.margin - (self.__len__() % self.margin)
         else:
             return 0
 
@@ -117,13 +120,13 @@ class CustomBatchSampler(Sampler):
         self.Index = -1
         self.EpochCounter = 0
         self.Indices = list(range(len(self.DataSource)))
-        CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataRepeatNumber)
+        CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataChunkNumber)
 
 
     @staticmethod
-    def RepeatedDataSegmentList(batch_size, batch_data_repeat_number):
-        """[1 1 1 1 1 1 1 1], [2 2 2 2], [3 3 2], [8]"""
-        chunkSize = torch.clamp(torch.tensor(batch_data_repeat_number), 1, batch_size)
+    def RepeatedDataSegmentList(batch_size, batch_data_chunk_number):
+        """[1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]"""
+        chunkSize = torch.clamp(torch.tensor(batch_data_chunk_number), 1, batch_size)
         chunks = torch.chunk(torch.arange(batch_size), chunkSize) 
         CustomBatchSampler.BatchRepeatDataSegment = list(map(len, chunks))
 
@@ -263,19 +266,32 @@ class SpectralSegmentationDataset(SegmentationDataset):
         return reference_band_index
 
 
+    def SortByPatterns(self, path_list, data_filter):
+        def match_priority(path):
+            for i, pattern in enumerate(data_filter):
+                if re.search(pattern, path):
+                    return i
+            return len(data_filter)
+        
+        return sorted(path_list, key=match_priority)
+
+
     def ReadRaster(self, file_path=List[FilePath], allow_streaming=False, raster_transformers=[], channel_order=None, bbox=None):
+        paths = [fp.Path for fp in file_path]
+        
+        if self.Config.DataFilter:
+            paths = self.SortByPatterns(paths, self.Config.DataFilter)
+        
         rasters = []
-        for fp in file_path:
+        for path in paths:
             raster = RasterioSource(
-                        fp.Path,
+                        path,
                         allow_streaming=allow_streaming,
                         raster_transformers=raster_transformers,
                         channel_order=channel_order,
                         bbox=bbox
                     )
             
-            
-
             rasters+=[raster]
         return rasters
 
@@ -405,16 +421,18 @@ dsConfig = SegmentationDatasetConfig(
     ClassColors=["lightgray", "darkred"],
     NullClass="background",
     MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-    PatchSize=(64, 64),
+    PatchSize=(128, 128),
     PaddingSize=0,
     Shuffle=True,
     Epoch=2,
     DatasetRootPath=DATASET_PATH,
     RandomPatch=False,
-    BatchDataRepeatNumber=2,
+    BatchDataChunkNumber=8,
     BatchSize=8,
     DropLastBatch=True,
-    ChannelOrder=[1,2,3,7]
+    DataFileOrder=[""],
+    # ChannelOrder=[1,2,3,7],
+    DataFilter=[".*_10m", ".*_20m", ".*_IR"]
 )
 
 

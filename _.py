@@ -1,22 +1,24 @@
-import torch
-import torch.nn as nn
+import re
 
-# Model çıktıları (logits) - [batch_size, num_classes, height, width]
-logits = torch.randn(16, 9, 64, 64)  # Örnek çıktı: 16x9x64x64
+def SortByPatterns(path_list, data_filter):
+    def match_priority(path):
+        for i, pattern in enumerate(data_filter):
+            if re.search(pattern, path):
+                return i
+        return len(data_filter)
+    
+    return sorted(path_list, key=match_priority)
 
-# One-hot encoded target - [batch_size, num_classes, height, width]
-one_hot_target = torch.randint(0, 9, (16, 9, 64, 64))
-one_hot_target = torch.nn.functional.one_hot(one_hot_target.argmax(dim=1), num_classes=9).permute(0, 3, 1, 2)
-print(one_hot_target.shape)
-# One-hot encoded hedefi sınıf indekslerine dönüştür
-# argmax ile sınıf indekslerini elde edelim
-targets = one_hot_target.argmax(dim=1)  # [batch_size, height, width]
+# Örnek path listesi
+path_list = [
+    "31UGR_20180418T104021_50_007153_6_167685_10m_RGB.tif",
+    "31UGR_20180418T104021_50_007153_6_167685_20m_RGB.tif",
+    "31UGR_20180418T104021_50_007153_6_167685_IR.tif",
+    "31UGR_20180418T104021_50_007153_6_167685_20m_IR.tif",
+    "31UGR_20180418T104021_50_007153_6_167685_10m_IR.tif",
+]
 
-# CrossEntropyLoss tanımlama
-criterion = nn.CrossEntropyLoss()
+data_filter = [".*_10m", ".*_20m", ".*_IR"]
 
-# Loss hesaplama
-loss = criterion(logits, targets)
-
-# Sonucu yazdır
-print(loss.item())
+sorted_paths = sort_by_patterns(path_list, data_filter)
+print("\n".join(sorted_paths))

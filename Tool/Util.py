@@ -1,7 +1,7 @@
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
+import re
 import json
 from typing import Annotated, List, Optional
 
@@ -39,8 +39,7 @@ def ExtractDatasetMeta(data_dir, target_dir) -> List[DataSourceMeta]:
                 targetScenePath = os.path.join(target_dir, basename)
                 
                 targetFilePaths = [
-                    FilePath(Path=_x) for _x in map(lambda x: os.path.join(targetScenePath, x), os.listdir(targetScenePath)) 
-                        if os.path.isfile(_x)
+                    FilePath(Path=_x) for _x in map(lambda x: os.path.join(targetScenePath, x), os.listdir(targetScenePath)) if os.path.isfile(_x)
                 ]               
 
                 allData+= [
@@ -52,6 +51,59 @@ def ExtractDatasetMeta(data_dir, target_dir) -> List[DataSourceMeta]:
                 ]
 
     return allData
+
+
+def ExpressionChecker(value, queries=[], method="or") -> bool:
+    if not queries:
+        return True
+    if method == "or":
+        return any(re.search(patern, value) for patern in queries)
+    elif method == "and":
+        return all(re.search(patern, value) for patern in queries)
+
+
+def ExtractDatasetMetaViaFilters(data_dir, target_dir, data_filter=None, target_filter=None, limit=None) -> List[DataSourceMeta]:
+    allData: List[DataSourceMeta] = []
+    for root, dirs, files in os.walk(data_dir):
+        if root == data_dir:                    # First Depth Level
+            scenes = dirs.copy()
+        else:
+            basename = os.path.basename(root)
+            if basename in scenes:              # Second Depth Level
+                # Data Files
+                dataFilePaths = []
+                for x in files:
+                    if data_filter:
+                        if not ExpressionChecker(x, data_filter):
+                            continue
+                    dataFilePaths+=[FilePath(Path=os.path.join(root, x))]
+                             
+                targetScenePath = os.path.join(target_dir, basename)
+                
+                # Target Files
+                targetFilePaths = []
+                for _x in map(lambda x: os.path.join(targetScenePath, x), os.listdir(targetScenePath)):
+                    if os.path.isfile(_x):
+
+                        if target_filter:
+                            if not ExpressionChecker(_x, target_filter):
+                                continue
+
+                        targetFilePaths += [FilePath(Path=_x)]
+
+                allData+= [
+                    DataSourceMeta(
+                        Scene=basename,
+                        DataPaths=dataFilePaths,
+                        LabelPaths=targetFilePaths
+                    )
+                ]
+
+                if limit and len(allData) >= limit:
+                    break
+
+    return allData
+
 
 
 def CrateDatasetIndexFile(dataset_source_meta: List[DataSourceMeta], save_dir: str = None, save_file: bool = True) -> dict:
@@ -82,13 +134,23 @@ def ReadDatasetFromIndexFile(dataset_dir: str) -> List[DataSourceMeta]:
 
 if "__main__" == __name__:
     os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
-    DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
-    DATA_PATH = DATASET_PATH + f"/data/Resample/raster"
-    MASK_PATH = DATASET_PATH + f"/mask/raster/"
+    DATASET_PATH = "/home/blitzkrieg/Downloads/spring/" # GetIndexDatasetPath("LULC_IO_10m")
 
-    dataset = ExtractDatasetMeta(DATA_PATH, MASK_PATH)
-    CrateDatasetIndexFile(dataset, save_dir=DATASET_PATH)
-    data = ReadDatasetFromIndexFile(DATASET_PATH)
+    DATA_PATH = DATASET_PATH + f"/grid1"
+    MASK_PATH = DATASET_PATH + f"/grid1"
 
+    dataset = ExtractDatasetMetaViaFilters(
+        DATA_PATH, MASK_PATH,
+        data_filter=[".*_10m",".*_20m", ".*_IR"],
+        target_filter=[".*_labels"], limit=6000
+    )
+    
+
+    # Write to JsonFile
+    OUTPUT_PATH = "data/dataset/SeasoNet"
+    CrateDatasetIndexFile(dataset, save_dir=OUTPUT_PATH)
+    
+    # Read
+    data = ReadDatasetFromIndexFile(OUTPUT_PATH)
     for x in data:
         print(x.LabelPaths[0])
