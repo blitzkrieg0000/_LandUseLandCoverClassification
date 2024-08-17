@@ -340,7 +340,7 @@ if "__main__" == __name__:
                         "train_accuracy": accuracy
                     })
                     inputs: torch.Tensor
-                    if (1+step) % 5 == 0:
+                    if (1+step) % 50 == 0:
                         image:np.ndarray = inputs[0][1:4, :, :].permute(1, 2, 0).cpu().numpy()
                         image = (image - image.min()) / (image.max() - image.min())
                         wb_image = WBMask(
@@ -361,7 +361,7 @@ if "__main__" == __name__:
                 if _ActivateWB:
                     wandb.save(f"./data/wandb/weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
 
-            if (1+step) % 10 == 0:
+            if (1+step) % 100 == 0:
                 wandb.log({"Segmentation Visualization": result_images})
                 result_images.clear()
 
