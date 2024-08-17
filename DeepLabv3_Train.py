@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import sys
 os.environ["DATA_INDEX_FILE"] = "data/dataset/.index"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import random
@@ -26,19 +28,19 @@ EPOCHS = 50
 LEARNING_RATE = 1e-3
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BATCH_SIZE = 16
-PATCH_SIZE = 128   # Window Size
+PATCH_SIZE = 120   # Window Size
 STRIDE_SIZE = 64   # Sliding Window
-num_channels = 13  # Multispektral kanal sayısı
-num_classes = 9    # Maskedeki sınıf sayısı
-classes = torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
+num_channels = 10  # Multispektral kanal sayısı
+num_classes = 33    # Maskedeki sınıf sayısı
+classes =  torch.range(1, num_classes) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
 _ActivateWB = True
 
 
 # =================================================================================================================== #
 #! DATASET
 # =================================================================================================================== #
-DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
-
+# DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
+DATASET_PATH = "data/dataset/SeasoNet"
 dsConfig = SegmentationDatasetConfig(
     ClassNames=["background", "excavation_area"],
     ClassColors=["lightgray", "darkred"],
@@ -53,7 +55,10 @@ dsConfig = SegmentationDatasetConfig(
     BatchDataRepeatNumber=1,
     BatchSize=BATCH_SIZE,
     DropLastBatch=True,
-    StrideSize=STRIDE_SIZE
+    StrideSize=STRIDE_SIZE,
+    BatchDataChunkNumber=8,
+    # ChannelOrder=[1,2,3,7],
+    DataFilter=[".*_10m", ".*_20m", ".*_IR"]
 )
 
 dataset = SpectralSegmentationDataset(dsConfig)
@@ -197,12 +202,12 @@ class DiceLoss(nn.Module):
         self.reduction = reduction
 
     def forward(self, inputs, targets):
-        # inputs: BATCHx9x128x128
+        # inputs: BATCHxCLASSx128x128
         # targets: BATCHx128x128 (her piksel için sınıf etiketleri)
 
-        inputs = F.softmax(inputs, dim=1)  # BATCHx9x128x128
-        targets_one_hot = F.one_hot(targets, num_classes=inputs.shape[1])  # BATCHx128x128x9
-        targets_one_hot = targets_one_hot.permute(0, 3, 1, 2).float()  # BATCHx9x128x128
+        inputs = F.softmax(inputs, dim=1)  # BATCHxCLASSx128x128
+        targets_one_hot = F.one_hot(targets, num_classes=inputs.shape[1])  # BATCHx128x128xCLASS
+        targets_one_hot = targets_one_hot.permute(0, 3, 1, 2).float()  # BATCHxCLASSx128x128
 
         intersection = (inputs * targets_one_hot).sum(dim=(2, 3))
         union = inputs.sum(dim=(2, 3)) + targets_one_hot.sum(dim=(2, 3))

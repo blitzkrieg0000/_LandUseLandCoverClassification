@@ -6,12 +6,13 @@ import sys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-import torch
 import random
+from collections import deque
 from functools import reduce
 from typing import Annotated, List, Set, Tuple
 
 import numpy as np
+import torch
 from matplotlib import pyplot as plt
 from pydantic import BaseModel
 from rastervision.core.data import (ClassConfig, MultiRasterSource,
@@ -51,10 +52,47 @@ class SegmentationDatasetConfig(BaseModel):
 
 class SegmentationDataset(Dataset):
     def __init__(self):
-        self.GeoDatasetCache: List[TrackableIterator]
+        self.GeoDatasetCache: LimitedCache
         self.RandomPatch: SegmentationDatasetConfig
         self.ExpiredScenes: Set[str]
 
+
+
+class LimitedCache:
+    def __init__(self, max_size_mb: int):
+        self.cache = {}
+        self.order = deque()
+        self.max_size = max_size_mb * 1024 * 1024
+        self.current_size = 0
+
+    def __GetSize(self, item) -> int:
+        """ Verinin bellek boyutunu hesaplar. Bayt olarak döndürür."""
+        return sys.getsizeof(item)
+    
+    def Add(self, key, value):
+        item_size = self.__GetSize(key) + self.__GetSize(value)
+
+        # Yeni elemanı eklemeden önce mevcut belleği kontrol et
+        while self.current_size + item_size > self.max_size:
+            if len(self.order) == 0:
+                # Eğer deque boşsa, çık
+                break
+
+            # En eski anahtar-değer çiftini sil
+            oldest_key = self.order.popleft()
+            oldest_value = self.cache.pop(oldest_key)
+            self.current_size -= (self.__GetSize(oldest_key) + self.__GetSize(oldest_value))
+
+        # Yeni anahtar-değer çiftini ekle
+        self.cache[key] = value
+        self.order.append(key)
+        self.current_size += item_size
+
+    def Get(self, key):
+        return self.cache.get(key)
+
+    def GetItems(self):
+        return {key: self.cache[key] for key in self.order}
 
 
 class TrackableIterator():
@@ -145,9 +183,6 @@ class CustomBatchSampler(Sampler):
         if len(self.DataSource.ExpiredScenes)>=len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
             self.DataSource.ExpiredScenes.clear()
             self.EpochCounter += 1
-            # for c in self.DataSource.GeoDatasetCache:
-            #     c._Expired = False
-            #     c.Index = -1
 
             if self.EpochCounter >= self.Epoch:
                 # self.EpochCounter = 0
@@ -184,7 +219,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
         self.PaddingSize = config.PaddingSize
         self.Shuffle = config.Shuffle
         self.RandomPatch = config.RandomPatch
-        self.GeoDatasetCache = {}
+        self.GeoDatasetCache = LimitedCache(max_size_mb=1024)
         self.DatasetIndexMeta: List[DataSourceMeta] = ReadDatasetFromIndexFile(config.DatasetRootPath)
         # self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
         self.ExpiredScenes = set()
@@ -206,12 +241,12 @@ class SpectralSegmentationDataset(SegmentationDataset):
         _data: DataSourceMeta = self.DatasetIndexMeta[idx]
 
         # READ SCENE AND CACHE
-        geoDataset = self.GeoDatasetCache.get(_data.Scene, None)            # TODO State'i tut.
+        geoDataset = self.GeoDatasetCache.Get(_data.Scene)            # TODO State'i tut.
         print(f"SpectralSegmentationDataset:-> index: {idx}, scene: {_data.Scene}, pid: {os.getpid()}")
         if geoDataset is None:
             geoDataset = self.LoadData(_data)
             geoDataset = TrackableIterator(geoDataset, idx, cycle=True)
-            self.GeoDatasetCache[_data.Scene] = geoDataset                    
+            self.GeoDatasetCache.Add(_data.Scene, geoDataset)              
         
         #! Get Next
         data = label = None
@@ -413,24 +448,25 @@ def custom_collate_fn(batch):
     return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
 
 
-os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
-DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
+# os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
+# DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
+
+DATASET_PATH = "data/dataset/SeasoNet/"
 
 dsConfig = SegmentationDatasetConfig(
     ClassNames=["background", "excavation_area"],
     ClassColors=["lightgray", "darkred"],
     NullClass="background",
     MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-    PatchSize=(128, 128),
+    PatchSize=(120, 120),
     PaddingSize=0,
     Shuffle=True,
-    Epoch=2,
+    Epoch=5,
     DatasetRootPath=DATASET_PATH,
     RandomPatch=False,
     BatchDataChunkNumber=8,
     BatchSize=8,
     DropLastBatch=True,
-    DataFileOrder=[""],
     # ChannelOrder=[1,2,3,7],
     DataFilter=[".*_10m", ".*_20m", ".*_IR"]
 )

@@ -1,24 +1,48 @@
-import re
+import sys
+from collections import deque
 
-def SortByPatterns(path_list, data_filter):
-    def match_priority(path):
-        for i, pattern in enumerate(data_filter):
-            if re.search(pattern, path):
-                return i
-        return len(data_filter)
+class LimitedCache:
+    def __init__(self, max_size_mb: int):
+        self.cache = {}
+        self.order = deque()
+        self.max_size = max_size_mb * 1024 * 1024
+        self.current_size = 0  # Mevcut bellek kullanımını takip etme
+
+    def _get_size(self, item) -> int:
+        """ Verinin bellek boyutunu hesaplar. """
+        return sys.getsizeof(item)
     
-    return sorted(path_list, key=match_priority)
+    def add(self, key, value):
+        item_size = self._get_size(key) + self._get_size(value)
 
-# Örnek path listesi
-path_list = [
-    "31UGR_20180418T104021_50_007153_6_167685_10m_RGB.tif",
-    "31UGR_20180418T104021_50_007153_6_167685_20m_RGB.tif",
-    "31UGR_20180418T104021_50_007153_6_167685_IR.tif",
-    "31UGR_20180418T104021_50_007153_6_167685_20m_IR.tif",
-    "31UGR_20180418T104021_50_007153_6_167685_10m_IR.tif",
-]
+        # Yeni elemanı eklemeden önce mevcut belleği kontrol et
+        while self.current_size + item_size > self.max_size:
+            if len(self.order) == 0:
+                # Eğer deque boşsa, çık
+                break
 
-data_filter = [".*_10m", ".*_20m", ".*_IR"]
+            # En eski anahtar-değer çiftini sil
+            oldest_key = self.order.popleft()
+            oldest_value = self.cache.pop(oldest_key)
+            self.current_size -= (self._get_size(oldest_key) + self._get_size(oldest_value))
 
-sorted_paths = sort_by_patterns(path_list, data_filter)
-print("\n".join(sorted_paths))
+        # Yeni anahtar-değer çiftini ekle
+        self.cache[key] = value
+        self.order.append(key)
+        self.current_size += item_size
+
+    def get(self, key):
+        return self.cache.get(key)
+
+    def get_items(self):
+        return {key: self.cache[key] for key in self.order}
+
+
+
+# Örnek kullanım
+cache = LimitedCache(max_size_mb=1)  # 1 MB limit
+
+# Örnek veri ekleme
+cache.add("key1", "val1")  # 1 MB'lık bir string
+
+print(cache.get("key1"))
