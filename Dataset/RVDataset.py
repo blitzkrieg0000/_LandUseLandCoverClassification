@@ -233,7 +233,7 @@ class SpectralSegmentationDataset(SegmentationDataset):
     def __getitem__(self, idx):
         worker_info = torch.utils.data.get_worker_info()
         if worker_info:
-            print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id}/{worker_info.num_workers} workers")
+            print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id+1}/{worker_info.num_workers} workers")
 
         # READ SOURCE META
         idx %= len(self.DatasetIndexMeta)
@@ -480,7 +480,7 @@ customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
 DATALOADER = DataLoader(
     dataset,
     batch_sampler=customBatchSampler,
-    num_workers=0,
+    num_workers=2,
     persistent_workers=False, 
     pin_memory=True,
     collate_fn=custom_collate_fn,

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import sys
 import time
+
+from Model.Loss import DiceLoss
 os.environ["DATA_INDEX_FILE"] = "data/dataset/.index"
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 
@@ -42,63 +44,6 @@ _ActivateWB = True
 
 
 # =================================================================================================================== #
-#! DATASET
-# =================================================================================================================== #
-# DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
-DATASET_PATH = "data/dataset/SeasoNet"
-dsConfig = SegmentationDatasetConfig(
-    ClassNames=["background", "excavation_area"],
-    ClassColors=["lightgray", "darkred"],
-    NullClass="background",
-    MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-    PatchSize=(PATCH_SIZE, PATCH_SIZE),
-    PaddingSize=0,
-    Shuffle=True,
-    Epoch=EPOCHS,
-    DatasetRootPath=DATASET_PATH,
-    RandomPatch=False,
-    BatchDataRepeatNumber=1,
-    BatchSize=BATCH_SIZE,
-    DropLastBatch=True,
-    StrideSize=STRIDE_SIZE,
-    BatchDataChunkNumber=BATCH_CHUNK_NUMBER,
-    # ChannelOrder=[1,2,3,7],
-    DataFilter=[".*_10m", ".*_20m", ".*_IR"]
-)
-
-dataset = SpectralSegmentationDataset(dsConfig)
-customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
-
-print("Main Process Id:", os.getpid())
-DATALOADER = DataLoader(
-    dataset,
-    batch_sampler=customBatchSampler,
-    num_workers=0,
-    persistent_workers=False, 
-    pin_memory=True,
-    collate_fn=custom_collate_fn,
-    # multiprocessing_context = torch.multiprocessing.get_context("spawn")
-)
-
-class NormalizeSentinel2Transform(object):
-    def __call__(self, inputs: torch.Tensor):
-        #? Sentinel-2 verilerini [0, 1] aralığına normalize etmek için 10000'e bölme işlemi yapılır
-        return inputs / 10000.0
-
-
-TRANSFORM_IMAGE = tranformsv2.Compose([NormalizeSentinel2Transform()])
-
-
-#! VisualizeData - Test
-# VisualizeData(DATALOADER)
-# for i, (inputs, targets) in enumerate(DATALOADER):
-#     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-#     print("\n", "-"*10)
-#     print(f"Batch: {i}", inputs.shape, targets.shape)
-#     print("-"*10, "\n")
-
-
-# =================================================================================================================== #
 #! Wandb
 # =================================================================================================================== #
 def ReadWandbKeyFromFile() -> str:
@@ -129,12 +74,59 @@ if _ActivateWB:
 
 
 # =================================================================================================================== #
-#! MODEL
+#! LOAD DATA
+# =================================================================================================================== #
+# DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
+DATASET_PATH = "data/dataset/SeasoNet"
+dsConfig = SegmentationDatasetConfig(
+    ClassNames=["background", "excavation_area"],
+    ClassColors=["lightgray", "darkred"],
+    NullClass="background",
+    MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+    PatchSize=(PATCH_SIZE, PATCH_SIZE),
+    PaddingSize=0,
+    Shuffle=True,
+    Epoch=EPOCHS,
+    DatasetRootPath=DATASET_PATH,
+    RandomPatch=False,
+    BatchDataRepeatNumber=1,
+    BatchSize=BATCH_SIZE,
+    DropLastBatch=True,
+    StrideSize=STRIDE_SIZE,
+    BatchDataChunkNumber=BATCH_CHUNK_NUMBER,
+    # ChannelOrder=[1,2,3,7],
+    DataFilter=[".*_10m", ".*_20m", ".*_IR"]
+)
+
+dataset = SpectralSegmentationDataset(dsConfig)
+customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
+
+DATALOADER = DataLoader(
+    dataset,
+    batch_sampler=customBatchSampler,
+    num_workers=2,
+    persistent_workers=False, 
+    pin_memory=True,
+    collate_fn=custom_collate_fn,
+    # multiprocessing_context = torch.multiprocessing.get_context("spawn")
+)
+
+##! --------------- Transforms --------------- !##
+class NormalizeSentinel2Transform(object):
+    def __call__(self, inputs: torch.Tensor):
+        #? Sentinel-2 verilerini [0, 1] aralığına normalize etmek için 10000'e bölme işlemi yapılır
+        return inputs / 10000.0
+
+TRANSFORM_IMAGE = tranformsv2.Compose([NormalizeSentinel2Transform()])
+
+
+# =================================================================================================================== #
+#! CREATE MODEL
 # =================================================================================================================== #
 class DeepLabv3(torch.nn.Module):
     def __init__(self, input_channels=12, segmentation_classes=9, freeze_backbone=False):
         super(DeepLabv3, self).__init__()
-        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.DEFAULT)
+        self.model = deeplabv3_resnet50(weights=DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1)
 
         for param in self.model.parameters():
             param.requires_grad = not freeze_backbone
@@ -152,94 +144,29 @@ model = DeepLabv3(input_channels=num_channels, segmentation_classes=num_classes)
 model = model.to(DEVICE)
 model.train()
 
-
 ##! --------------- Load Weights --------------- !##
 model.load_state_dict(torch.load("Weight/deeplabv3_v1_196_500_17.08.2024_21.26.16.pth"))
 
+
+## --------------- Wandb Watch --------------- !##
+# wandb.watch(MODEL, log="all")
+
+
+## --------------- Show Model --------------- !##
 print(model)
 
 
+
 # =================================================================================================================== #
-#! Compile Model
+#! COMPILE MODEL
 # =================================================================================================================== #
-# def CrossEntropyloss(pred, target):
-#     log_prob = torch.nn.functional.log_softmax(pred, dim=1)
-#     summ = -(target * log_prob).sum(dim=1)
-#     return summ.mean()
-
-
-# def DiceLoss(pred, target, smooth=1.0):
-#     pred = torch.sigmoid(pred)
-#     intersection = (pred * target).sum(dim=(2, 3))
-#     dice = (2.0 * intersection + smooth) / (pred.sum(dim=(2, 3)) + target.sum(dim=(2, 3)) + smooth)
-#     return 1 - dice.mean()
-
-
-# def CombinedLoss(pred, target):
-#     return DiceLoss(pred, target) + CrossEntropyloss(pred, target)
-
-
-# Focal Loss
-class FocalLoss(nn.Module):
-    def __init__(self, gamma=2.0, alpha=None, reduction='mean'):
-        super(FocalLoss, self).__init__()
-        self.gamma = gamma
-        self.alpha = alpha
-        self.reduction = reduction
-
-    def forward(self, inputs, targets):
-        ce_loss = F.cross_entropy(inputs, targets, reduction="none")
-        pt = torch.exp(-ce_loss)  # pt = exp(-ce_loss)
-        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
-
-        if self.alpha is not None:
-            alpha = self.alpha[targets]
-            focal_loss = alpha * focal_loss
-
-        if self.reduction == "mean":
-            return focal_loss.mean()
-        elif self.reduction == "sum":
-            return focal_loss.sum()
-        else:
-            return focal_loss
-
-
-# Dice Loss
-class DiceLoss(nn.Module):
-    def __init__(self, smooth=1.0, reduction="mean"):
-        super(DiceLoss, self).__init__()
-        self.smooth = smooth
-        self.reduction = reduction
-
-    def forward(self, inputs, targets):
-        # inputs: BATCHxCLASSx128x128
-        # targets: BATCHx128x128 (her piksel için sınıf etiketleri)
-
-        inputs = F.softmax(inputs, dim=1)  # BATCHxCLASSx128x128
-        targets_one_hot = F.one_hot(targets, num_classes=inputs.shape[1])  # BATCHx128x128xCLASS
-        targets_one_hot = targets_one_hot.permute(0, 3, 1, 2).float()  # BATCHxCLASSx128x128
-
-        intersection = (inputs * targets_one_hot).sum(dim=(2, 3))
-        union = inputs.sum(dim=(2, 3)) + targets_one_hot.sum(dim=(2, 3))
-
-        dice_score = (2.0 * intersection + self.smooth) / (union + self.smooth)
-        dice_loss = 1 - dice_score
-
-        if self.reduction == "mean":
-            return dice_loss.mean()
-        elif self.reduction == "sum":
-            return dice_loss.sum()
-        else:
-            return dice_loss
-
 
 dice_loss_fn = DiceLoss()
 # focal_loss_fn = FocalLoss(gamma=2.0)
-# criterion = torch.nn.CrossEntropyLoss()
-
+# cross_entropy_loss_fn = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
-# Wandb Watch
-# wandb.watch(MODEL, log="all")
+
+
 
 random_number = random.randint(0, 1000)
 
@@ -292,6 +219,12 @@ if "__main__" == __name__:
         })
 
 
+    def ToOneHot2D(targets):
+        one_hot_mask = torch.zeros((targets.size(0), num_classes, targets.size(2), targets.size(3)), device=DEVICE)
+        one_hot_mask.scatter_(1, targets, 1) # Sınıf indekslerini one-hot kodlamalı tensor haline getir
+        return one_hot_mask
+
+
     # =================================================================================================================== #
     #! Train
     # =================================================================================================================== #
@@ -300,20 +233,23 @@ if "__main__" == __name__:
     for step, (inputs, targets) in enumerate(DATALOADER):
         inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 
-        #! Reorder Mask Values to Ordered Classes
+        
+        ##! --------------- Preprocess --------------- !##
+        # Reorder Mask Values to Ordered Classes
         targets = ChangeMaskOrder(targets, classes)
 
-        #! Mask To One Hot
+        # Mask To One Hot
         # One-hot kodlamalı tensor oluştur
         # targets = targets.unsqueeze(1)
-        # one_hot_mask = torch.zeros((targets.size(0), num_classes, targets.size(2), targets.size(3)), device=DEVICE)
-        # one_hot_mask.scatter_(1, targets, 1) # Sınıf indekslerini one-hot kodlamalı tensor haline getir
-        
-        optimizer.zero_grad()
+        targets = ToOneHot2D(targets)
         
         inputs = TRANSFORM_IMAGE(inputs)
 
-        # Forward Pass
+        # Zeroing The Gradients
+        optimizer.zero_grad()
+
+
+        ##! --------------- Forward Pass --------------- !##
         outputs = model(inputs)["out"]
         
         # Loss
@@ -321,17 +257,23 @@ if "__main__" == __name__:
 
         # Backward Pass
         loss.backward()
+
+        # Optimize Weights
         optimizer.step()
 
-        # Accuracy
+
+        ##! --------------- Evaluate --------------- !##
         with torch.no_grad():
             class_indices = torch.argmax(outputs, dim=1)
             targets = targets.squeeze(1)
-            # accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / PATCH_SIZE**2 /inputs.size(0))
+            
+            # Accuracy
             accuracy = 100 * (class_indices == targets).float().mean()
-
+            # accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / PATCH_SIZE**2 /inputs.size(0))
             totalAccuracy += accuracy.item()
             print(f"Epoch {step+1}/{0}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy.item()}")
+
+            # Wandb
             if _ActivateWB:
                 try:
                     wandb.log({
@@ -354,7 +296,8 @@ if "__main__" == __name__:
                     print(e)
 
             print(f"Step: {step+1}, Epoch Accuracy: {totalAccuracy/(step+1)}")
-
+            
+            # Save
             if step % 500 == 0:
                 date_time_now = time.strftime("%d.%m.%Y_%H.%M.%S", time.localtime())
                 torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
@@ -365,8 +308,8 @@ if "__main__" == __name__:
                 wandb.log({"Segmentation Visualization": result_images})
                 result_images.clear()
 
-
-
+    
+    ##! --------------- Finalize --------------- !##
     torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_final.pth")
     if _ActivateWB:
         date_time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
