@@ -93,7 +93,7 @@ STRIDE_SIZE = 64   # Sliding Window
 NUM_CHANNELS = 10  # Multispektral kanal sayısı
 NUM_CLASSES = len(LULC_CLASSES)    # Maskedeki sınıf sayısı
 classes = torch.arange(1, NUM_CLASSES + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
-_ActivateWB = False
+_ActivateWB = True
 
 
 # =================================================================================================================== #
@@ -148,7 +148,7 @@ dsConfig = SegmentationDatasetConfig(
     DropLastBatch=True,
     StrideSize=STRIDE_SIZE,
     BatchDataChunkNumber=BATCH_CHUNK_NUMBER,
-    DataFilter=[".*_10m", ".*_20m", ".*_IR"],
+    DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
     # ChannelOrder=[1,2,3,7]
 )
 
@@ -189,7 +189,7 @@ model.train()
 ##! --------------- Load Weights --------------- !##
 # %87 Acc => Weight/DeepLabv3/deeplabv3_v1_128_6000_18.08.2024_13.48.38.pth
 # %94 Acc => Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.pth
-model.load_state_dict(torch.load("./Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.pth"))
+model.load_state_dict(torch.load("./Weight/DeepLabv3/deeplabv3_v1_19_1200_18.08.2024_17.25.56.pth"))
 
 ## --------------- Wandb Watch --------------- !##
 # wandb.watch(MODEL, log="all")

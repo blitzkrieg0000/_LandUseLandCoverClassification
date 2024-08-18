@@ -472,7 +472,7 @@ dsConfig = SegmentationDatasetConfig(
     BatchSize=16,
     DropLastBatch=True,
     # ChannelOrder=[1,2,3,7],
-    DataFilter=[".*_10m", ".*_20m", ".*_IR"]
+    DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"]
 )
 
 
