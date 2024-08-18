@@ -4,7 +4,7 @@ import os
 import sys
 import time
 
-from Model import DeepLabv3
+from Model.DeepLabv3 import DeepLabv3
 from Model.Loss import DiceLoss
 from Tool.Const import RGB_COLORS
 
@@ -89,7 +89,7 @@ STRIDE_SIZE = 64   # Sliding Window
 NUM_CHANNELS = 10  # Multispektral kanal sayısı
 NUM_CLASSES = len(LULC_CLASSES)    # Maskedeki sınıf sayısı
 classes = torch.arange(1, NUM_CLASSES + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
-_ActivateWB = True
+_ActivateWB = False
 
 
 # =================================================================================================================== #
@@ -121,7 +121,6 @@ def InitializeWandb():
 
 if _ActivateWB:
     InitializeWandb()
-
 
 
 # =================================================================================================================== #
@@ -164,7 +163,7 @@ DATALOADER = DataLoader(
 
 
 ##! --------------- Visualize Data --------------- !##
-VisualizeData(DATALOADER)
+# VisualizeData(DATALOADER)
 
 
 ##! --------------- Transforms --------------- !##
@@ -184,7 +183,7 @@ model = model.to(DEVICE)
 model.train()
 
 ##! --------------- Load Weights --------------- !##
-model.load_state_dict(torch.load("Weight/deeplabv3_v1_196_500_17.08.2024_21.26.16.pth"))
+# model.load_state_dict(torch.load("Weight/deeplabv3_v1*.pth"))
 
 
 ## --------------- Wandb Watch --------------- !##
@@ -202,7 +201,7 @@ print(model)
 
 
 ##! --------------- Loss --------------- !##
-# cross_entropy_loss_fn = torch.nn.CrossEntropyLoss()
+cross_entropy_loss_fn = torch.nn.CrossEntropyLoss()
 # focal_loss_fn = FocalLoss(gamma=2.0)
 # dice_loss_fn = DiceLoss()
 
@@ -242,7 +241,7 @@ if "__main__" == __name__:
         # Mask To One Hot
         # One-hot kodlamalı tensor oluştur
         # targets = targets.unsqueeze(1)
-        targets = ToOneHot2D(targets)
+        # targets = ToOneHot2D(targets)
         
         inputs = TRANSFORM_IMAGE(inputs)
 
@@ -254,7 +253,7 @@ if "__main__" == __name__:
         outputs = model(inputs)["out"]
         
         # Loss
-        loss = dice_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
+        loss = cross_entropy_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
 
         # Backward Pass
         loss.backward()

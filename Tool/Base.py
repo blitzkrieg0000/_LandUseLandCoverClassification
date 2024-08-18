@@ -1,3 +1,4 @@
+import random
 from typing import List
 import numpy as np
 import torch
@@ -59,3 +60,12 @@ def ChangeMaskOrder(mask: torch.Tensor, classes: torch.Tensor):
 def CountModelParameters(model):
     """ Count Model Parameters """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+
+def GenerateRandomColors(num_colors):
+    colors = []
+    for _ in range(num_colors):
+        color = [random.randint(0, 255) for _ in range(3)]
+        colors.append(color)
+    return colors
