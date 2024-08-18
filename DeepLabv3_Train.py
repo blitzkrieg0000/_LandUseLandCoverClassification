@@ -29,7 +29,7 @@ from torchvision.transforms import v2 as tranformsv2
 from Dataset.RVDataset import (CustomBatchSampler, SegmentationDatasetConfig,
                                SpectralSegmentationDataset, VisualizeData,
                                custom_collate_fn)
-from Tool.Base import ChangeMaskOrder
+from Tool.Base import ChangeMaskOrder, GetTimeStampNow
 from Tool.DataStorage import GetIndexDatasetPath
 
 
@@ -269,16 +269,16 @@ if "__main__" == __name__:
             
             # Accuracy
             accuracy = 100 * (class_indices == targets).float().mean()
-            # accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / PATCH_SIZE**2 /inputs.size(0))
+            # accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / PATCH_SIZE**2 /inputs.size(0))   # Pixel Accuracy
             totalAccuracy += accuracy.item()
-            print(f"Epoch {step+1}/{0}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy.item()}")
+            print(f"Epoch {step+1}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy.item()}, Average Accuracy: {totalAccuracy/(step+1)}")
 
             # Wandb
             if _ActivateWB:
                 try:
                     wandb.log({
                         "epoch": step,
-                        "train_loss": loss.item()/BATCH_SIZE,
+                        "train_loss": loss.item() / BATCH_SIZE,
                         "train_accuracy": accuracy
                     })
                     inputs: torch.Tensor
@@ -295,16 +295,15 @@ if "__main__" == __name__:
                 except Exception as e:
                     print(e)
 
-            print(f"Step: {step+1}, Epoch Accuracy: {totalAccuracy/(step+1)}")
             
             # Save
-            if step % 500 == 0:
-                date_time_now = time.strftime("%d.%m.%Y_%H.%M.%S", time.localtime())
+            if step % 300 == 0:
+                date_time_now = GetTimeStampNow()
                 torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
                 if _ActivateWB:
                     wandb.save(f"./data/wandb/weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
 
-            if (1+step) % 100 == 0:
+            if (1+step) % 50 == 0:
                 wandb.log({"Segmentation Visualization": result_images})
                 result_images.clear()
 
@@ -312,8 +311,7 @@ if "__main__" == __name__:
     ##! --------------- Finalize --------------- !##
     torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_final.pth")
     if _ActivateWB:
-        date_time_now = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        wandb.save(f".data/wandb/weight/deeplabv3_{random_number}_{date_time_now}_final.pth")
+        wandb.save(f".data/wandb/weight/deeplabv3_{random_number}_{GetTimeStampNow()}_final.pth")
         wandb.finish()
 
 

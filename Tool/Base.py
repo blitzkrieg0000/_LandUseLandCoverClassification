@@ -1,4 +1,5 @@
 import random
+import time
 from typing import List
 import numpy as np
 import torch
@@ -61,6 +62,9 @@ def CountModelParameters(model):
     """ Count Model Parameters """
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
+
+def GetTimeStampNow() -> str:
+    return time.strftime("%d.%m.%Y_%H.%M.%S", time.localtime())
 
 
 def GenerateRandomColors(num_colors):
