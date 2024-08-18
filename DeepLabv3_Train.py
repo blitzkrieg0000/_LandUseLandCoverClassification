@@ -93,7 +93,7 @@ STRIDE_SIZE = 64   # Sliding Window
 NUM_CHANNELS = 10  # Multispektral kanal sayısı
 NUM_CLASSES = len(LULC_CLASSES)    # Maskedeki sınıf sayısı
 classes = torch.arange(1, NUM_CLASSES + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
-_ActivateWB = True
+_ActivateWB = False
 
 
 # =================================================================================================================== #
@@ -202,7 +202,7 @@ print(model)
 # torch.onnx.export(
 #     model, 
 #     torch.rand(16, 10, 120, 120).to(DEVICE),
-#     "Weight/DeepLabv3/deeplabv3_v1.onnx",
+#     "Weight/DeepLabv3/deeplabv3_v1_19_1200_18.08.2024_17.25.56.onnx",
 #     dynamic_axes={
 #         "input": {0: "batch_size"},
 #         "output": {0: "batch_size"}
@@ -211,7 +211,7 @@ print(model)
 #     output_names = ["output"],
 #     opset_version=11
 # )
-
+# exit()
 
 # =================================================================================================================== #
 #! COMPILE MODEL
