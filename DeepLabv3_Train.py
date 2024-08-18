@@ -89,7 +89,7 @@ STRIDE_SIZE = 64   # Sliding Window
 NUM_CHANNELS = 10  # Multispektral kanal sayısı
 NUM_CLASSES = len(LULC_CLASSES)    # Maskedeki sınıf sayısı
 classes = torch.arange(1, NUM_CLASSES + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
-_ActivateWB = False
+_ActivateWB = True
 
 
 # =================================================================================================================== #
@@ -299,17 +299,17 @@ if "__main__" == __name__:
             # Save
             if step % 300 == 0:
                 date_time_now = GetTimeStampNow()
-                torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
+                torch.save(model.state_dict(), f"./Weight/DeepLabv3/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
                 if _ActivateWB:
                     wandb.save(f"./data/wandb/weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
 
-            if (1+step) % 50 == 0:
+            if (1+step) % 300 == 0:
                 wandb.log({"Segmentation Visualization": result_images})
                 result_images.clear()
 
     
     ##! --------------- Finalize --------------- !##
-    torch.save(model.state_dict(), f"./Weight/deeplabv3_v1_{random_number}_final.pth")
+    torch.save(model.state_dict(), f"./Weight/DeepLabv3/deeplabv3_v1_{random_number}_final.pth")
     if _ActivateWB:
         wandb.save(f".data/wandb/weight/deeplabv3_{random_number}_{GetTimeStampNow()}_final.pth")
         wandb.finish()
