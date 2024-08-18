@@ -2,6 +2,7 @@ from typing import List
 import numpy as np
 import torch
 
+
 class EarlyStopping():
     def __init__(self, patience=5, verbose=False, delta=0, checkpoint_save_path="checkpoint.pt"):
         self.patience = patience

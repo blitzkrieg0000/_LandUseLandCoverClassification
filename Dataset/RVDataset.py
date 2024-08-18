@@ -33,8 +33,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class SegmentationDatasetConfig(BaseModel):
     ClassNames: Annotated[List[str], "Class Names"]
-    ClassColors: Annotated[List[str], "Class Colors"]
-    NullClass: Annotated[str, "Null Class"]
+    ClassColors: Annotated[List[str| tuple], "Class Colors"]
+    NullClass: Annotated[str, "Null Class"]=None
     MaxWindowsPerScene: Annotated[int | float | None, "Max Windows Per Scene"]
     DatasetRootPath:Annotated[str, "Dataset Index File"]
     PatchSize:Annotated[Tuple[int, int] | int, "Patch Size"]

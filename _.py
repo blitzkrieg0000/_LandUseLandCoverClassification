@@ -1,48 +1,15 @@
-import sys
-from collections import deque
+import random
 
-class LimitedCache:
-    def __init__(self, max_size_mb: int):
-        self.cache = {}
-        self.order = deque()
-        self.max_size = max_size_mb * 1024 * 1024
-        self.current_size = 0  # Mevcut bellek kullanımını takip etme
+def generate_random_colors(num_colors):
+    colors = []
+    for _ in range(num_colors):
+        color = [random.randint(0, 255) for _ in range(3)]
+        colors.append(color)
+    return colors
 
-    def _get_size(self, item) -> int:
-        """ Verinin bellek boyutunu hesaplar. """
-        return sys.getsizeof(item)
-    
-    def add(self, key, value):
-        item_size = self._get_size(key) + self._get_size(value)
+# 100 adet RGB renk listesi oluştur
+random_colors = generate_random_colors(100)
 
-        # Yeni elemanı eklemeden önce mevcut belleği kontrol et
-        while self.current_size + item_size > self.max_size:
-            if len(self.order) == 0:
-                # Eğer deque boşsa, çık
-                break
+# Renk listesini yazdır
+print(random_colors)
 
-            # En eski anahtar-değer çiftini sil
-            oldest_key = self.order.popleft()
-            oldest_value = self.cache.pop(oldest_key)
-            self.current_size -= (self._get_size(oldest_key) + self._get_size(oldest_value))
-
-        # Yeni anahtar-değer çiftini ekle
-        self.cache[key] = value
-        self.order.append(key)
-        self.current_size += item_size
-
-    def get(self, key):
-        return self.cache.get(key)
-
-    def get_items(self):
-        return {key: self.cache[key] for key in self.order}
-
-
-
-# Örnek kullanım
-cache = LimitedCache(max_size_mb=1)  # 1 MB limit
-
-# Örnek veri ekleme
-cache.add("key1", "val1")  # 1 MB'lık bir string
-
-print(cache.get("key1"))
