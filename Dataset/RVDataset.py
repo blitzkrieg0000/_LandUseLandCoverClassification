@@ -59,20 +59,27 @@ class SegmentationDataset(Dataset):
 
 
 class LimitedCache():
-    def __init__(self, max_size_mb: int):
+    def __init__(self, max_size_mb: int=1024, max_items: int = 300):
         self.cache = {}
         self.order = deque()
         self.max_size = max_size_mb * 1024 * 1024
         self.current_size = 0
+        self.max_items = max_items
+
 
     def __GetSize(self, item) -> int:
         return sys.getsizeof(item)
     
+
+    def Get(self, key):
+        return self.cache.get(key)
+
+
     def Add(self, key, value):
         item_size = self.__GetSize(key) + self.__GetSize(value)
 
-        # Yeni elemanı eklemeden önce mevcut belleği kontrol et
-        while self.current_size + item_size > self.max_size:
+        # Yeni elemanı eklemeden önce mevcut öğe sayısını kontrol et
+        while len(self.order) >= self.max_items or self.current_size + item_size > self.max_size:
             if len(self.order) == 0:
                 # Eğer deque boşsa, çık
                 break
@@ -86,12 +93,7 @@ class LimitedCache():
         self.cache[key] = value
         self.order.append(key)
         self.current_size += item_size
-
-    def Get(self, key):
-        return self.cache.get(key)
-
-    def GetItems(self):
-        return {key: self.cache[key] for key in self.order}
+        print("Cache Size: ", self.current_size)
 
 
 class TrackableIterator():
@@ -247,6 +249,8 @@ class SpectralSegmentationDataset(SegmentationDataset):
             geoDataset = TrackableIterator(geoDataset, idx, cycle=True)
             self.GeoDatasetCache.Add(_data.Scene, geoDataset)              
         
+
+
         #! Get Next
         data = label = None
         if self.RandomPatch:
@@ -464,8 +468,8 @@ dsConfig = SegmentationDatasetConfig(
     Epoch=5,
     DatasetRootPath=DATASET_PATH,
     RandomPatch=False,
-    BatchDataChunkNumber=8,
-    BatchSize=8,
+    BatchDataChunkNumber=16,
+    BatchSize=16,
     DropLastBatch=True,
     # ChannelOrder=[1,2,3,7],
     DataFilter=[".*_10m", ".*_20m", ".*_IR"]
@@ -490,15 +494,15 @@ DATALOADER = DataLoader(
 if "__main__" == __name__:
     print("Main Process Id:", os.getpid())
 
-    # for i, (inputs, targets) in enumerate(DATALOADER):
-    #     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-    #     print("\n", "-"*10)
-    #     print(f"Batch: {i}", inputs.shape, targets.shape)
-    #     print("-"*10, "\n")
-    #     print(f"Batch: {i}")
+    for i, (inputs, targets) in enumerate(DATALOADER):
+        inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+        print("\n", "-"*10)
+        print(f"Batch: {i}", inputs.shape, targets.shape)
+        print("-"*10, "\n")
+        print(f"Batch: {i}")
 
     #! VisualizeData
-    VisualizeData(DATALOADER)
+    # VisualizeData(DATALOADER)
     
     
 

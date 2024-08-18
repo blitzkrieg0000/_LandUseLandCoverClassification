@@ -33,6 +33,10 @@ from Tool.Base import ChangeMaskOrder, GetTimeStampNow
 from Tool.DataStorage import GetIndexDatasetPath
 
 
+# Clear GPU cache
+torch.cuda.empty_cache()
+
+
 # =================================================================================================================== #
 #! CONSTS
 # =================================================================================================================== #
