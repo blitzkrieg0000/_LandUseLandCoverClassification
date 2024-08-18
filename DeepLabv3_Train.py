@@ -85,7 +85,7 @@ LULC_CLASSES = {
     }
 
 EPOCHS = 50
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-4
 BATCH_SIZE = 16
 BATCH_CHUNK_NUMBER = BATCH_SIZE
 PATCH_SIZE = 120   # Window Size
@@ -93,7 +93,7 @@ STRIDE_SIZE = 64   # Sliding Window
 NUM_CHANNELS = 10  # Multispektral kanal sayısı
 NUM_CLASSES = len(LULC_CLASSES)    # Maskedeki sınıf sayısı
 classes = torch.arange(1, NUM_CLASSES + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
-_ActivateWB = True
+_ActivateWB = False
 
 
 # =================================================================================================================== #
@@ -187,7 +187,9 @@ model = model.to(DEVICE)
 model.train()
 
 ##! --------------- Load Weights --------------- !##
-# model.load_state_dict(torch.load("./Weight/DeepLabv3/deeplabv3_v1_128_3000_18.08.2024_13.09.05.pth"))
+# %87 Acc => Weight/DeepLabv3/deeplabv3_v1_128_6000_18.08.2024_13.48.38.pth
+# %94 Acc => Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.pth
+model.load_state_dict(torch.load("./Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.pth"))
 
 ## --------------- Wandb Watch --------------- !##
 # wandb.watch(MODEL, log="all")
@@ -196,17 +198,28 @@ model.train()
 ## --------------- Show Model --------------- !##
 print(model)
 
+## Onnx Export
+# torch.onnx.export(
+#     model, 
+#     torch.rand(16, 10, 120, 120).to(DEVICE),
+#     "Weight/DeepLabv3/deeplabv3_v1.onnx",
+#     dynamic_axes={
+#         "input": {0: "batch_size"},
+#         "output": {0: "batch_size"}
+#     },
+#     input_names = ["input"],
+#     output_names = ["output"],
+#     opset_version=11
+# )
 
 
 # =================================================================================================================== #
 #! COMPILE MODEL
 # =================================================================================================================== #
-
-
 ##! --------------- Loss --------------- !##
 cross_entropy_loss_fn = torch.nn.CrossEntropyLoss()
 # focal_loss_fn = FocalLoss(gamma=2.0)
-# dice_loss_fn = DiceLoss()
+dice_loss_fn = DiceLoss()
 
 
 ##! --------------- Optimizer --------------- !##
@@ -256,7 +269,7 @@ if "__main__" == __name__:
         outputs = model(inputs)["out"]
         
         # Loss
-        loss = cross_entropy_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
+        loss = cross_entropy_loss_fn(outputs, targets) + dice_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
 
         # Backward Pass
         loss.backward()
