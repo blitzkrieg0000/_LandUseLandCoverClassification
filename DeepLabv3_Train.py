@@ -187,8 +187,7 @@ model = model.to(DEVICE)
 model.train()
 
 ##! --------------- Load Weights --------------- !##
-# model.load_state_dict(torch.load("Weight/deeplabv3_v1*.pth"))
-
+# model.load_state_dict(torch.load("./Weight/DeepLabv3/deeplabv3_v1_128_3000_18.08.2024_13.09.05.pth"))
 
 ## --------------- Wandb Watch --------------- !##
 # wandb.watch(MODEL, log="all")
