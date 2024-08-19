@@ -39,7 +39,7 @@ def FindPrimarySource(bands):
 
 
 # Load Model
-model_path = "./Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.onnx"
+model_path = "Weight/DeepLabv3/deeplabv3_v1_701_16800_19.08.2024_21.52.32.onnx"
 
 session = ort.InferenceSession(model_path, providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
 input_name = session.get_inputs()[0].name
@@ -88,6 +88,7 @@ x, y = 0, 0
 chip = rasterSource[x:x+120, y:y+120, :]
 
 # Normalize
+print(np.iinfo(chip.dtype).max)
 chip = chip / np.iinfo(chip.dtype).max
 chip = chip.astype(np.float32)
 chip = np.expand_dims(chip, axis=0)
@@ -96,7 +97,7 @@ chip = np.transpose(chip, (0, 3, 1, 2))
 
 #! Inference Model
 # chip = TRANSFORM_IMAGE(chip)
-chip = chip / 10000.0
+# chip = chip / 10000.0
 result = session.run([output_name], {input_name: chip})
 output = result[0]
 

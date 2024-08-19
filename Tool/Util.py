@@ -141,8 +141,9 @@ if "__main__" == __name__:
 
     dataset = ExtractDatasetMetaViaFilters(
         DATA_PATH, MASK_PATH,
-        data_filter=[".*_10m",".*_20m", ".*_IR"],
-        target_filter=[".*_labels"], limit=6000
+        data_filter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
+        target_filter=[".*_labels"], 
+        limit=1_500_000
     )
     
 

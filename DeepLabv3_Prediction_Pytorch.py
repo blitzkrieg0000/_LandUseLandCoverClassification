@@ -9,7 +9,7 @@ from Model.DeepLabv3 import DeepLabv3
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model_path = "./Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.onnx"
+model_path = "Weight/DeepLabv3/deeplabv3_v1_701_16800_19.08.2024_21.52.32.pth"
 
 
 
@@ -37,7 +37,8 @@ model = DeepLabv3(input_channels=10, segmentation_classes=33)
 ##! --------------- Load Weights --------------- !##
 # %87 Acc => Weight/DeepLabv3/deeplabv3_v1_128_6000_18.08.2024_13.48.38.pth
 # %94 Acc => Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.pth
-model.load_state_dict(torch.load("./Weight/DeepLabv3/deeplabv3_v1_19_1200_18.08.2024_17.25.56.pth"))
+# deeplabv3_v1_19_1200_18.08.2024_17.25.56
+model.load_state_dict(torch.load(model_path))
 model = model.to(DEVICE)
 model.eval()
 

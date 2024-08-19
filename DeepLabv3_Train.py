@@ -23,7 +23,7 @@ import wandb
 from PIL import Image
 from torch import nn
 from torch.functional import F
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
                                              deeplabv3_resnet50)
 from torchvision.transforms import v2 as tranformsv2
@@ -95,7 +95,7 @@ STRIDE_SIZE = 64   # Sliding Window
 NUM_CHANNELS = 10  # Multispektral kanal sayısı
 NUM_CLASSES = len(LULC_CLASSES)    # Maskedeki sınıf sayısı
 classes = torch.arange(1, NUM_CLASSES + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
-_ActivateWB = False
+_ActivateWB = True
 
 
 # =================================================================================================================== #
@@ -155,9 +155,16 @@ dsConfig = SegmentationDatasetConfig(
 )
 
 dataset = SpectralSegmentationDataset(dsConfig)
-customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
 
-DATALOADER = DataLoader(
+
+
+valRatio = 0.0009
+testRatio = 0.05
+trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
+print(len(trainset), len(valset), len(testset))
+
+customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
+TRAIN_LOADER = DataLoader(
     dataset,
     batch_sampler=customBatchSampler,
     num_workers=2,
@@ -166,6 +173,8 @@ DATALOADER = DataLoader(
     collate_fn=custom_collate_fn,
     # multiprocessing_context = torch.multiprocessing.get_context("spawn")
 )
+
+VAL_LOADER = DataLoader(valset, batch_size=1)
 
 
 ##! --------------- Visualize Data --------------- !##
@@ -187,13 +196,13 @@ TRANSFORM_IMAGE = tranformsv2.Compose([NormalizeSentinel2Transform()])
 model = DeepLabv3(input_channels=NUM_CHANNELS, segmentation_classes=NUM_CLASSES)
 model = model.to(DEVICE)
 
-# model.train()
-model.eval()
+model.train()
+# model.eval()
 
 ##! --------------- Load Weights --------------- !##
 # %87 Acc => Weight/DeepLabv3/deeplabv3_v1_128_6000_18.08.2024_13.48.38.pth
 # %94 Acc => Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.pth
-model.load_state_dict(torch.load("./Weight/DeepLabv3/deeplabv3_v1_19_1200_18.08.2024_17.25.56.pth"))
+model.load_state_dict(torch.load("Weight/DeepLabv3/deeplabv3_v1_717_7200_20.08.2024_02.03.31.pth"))
 
 ## --------------- Wandb Watch --------------- !##
 # wandb.watch(MODEL, log="all")
@@ -202,11 +211,11 @@ model.load_state_dict(torch.load("./Weight/DeepLabv3/deeplabv3_v1_19_1200_18.08.
 ## --------------- Show Model --------------- !##
 print(model)
 
-## Onnx Export
+# Onnx Export
 # torch.onnx.export(
 #     model, 
 #     torch.rand(16, 10, 120, 120).to(DEVICE),
-#     "Weight/DeepLabv3/deeplabv3_v1_19_1200_18.08.2024_17.25.56.onnx",
+#     "./Weight/DeepLabv3/deeplabv3_v1_701_16800_19.08.2024_21.52.32.onnx",
 #     dynamic_axes={
 #         "input": {0: "batch_size"},
 #         "output": {0: "batch_size"}
@@ -230,7 +239,7 @@ dice_loss_fn = DiceLoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 
 
-
+VAL_INTERVAL = 300
 if "__main__" == __name__:
     def WBMask(bg_img, pred_mask, true_mask):
         return wandb.Image(bg_img, masks={
@@ -250,9 +259,9 @@ if "__main__" == __name__:
     # =================================================================================================================== #
     totalAccuracy = 0
     result_images = []
-    for step, (inputs, targets) in enumerate(DATALOADER):
+    for step, (inputs, targets) in enumerate(TRAIN_LOADER):
         inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-
+        
         
         ##! --------------- Preprocess --------------- !##
         # Reorder Mask Values to Ordered Classes
@@ -263,29 +272,30 @@ if "__main__" == __name__:
         # targets = targets.unsqueeze(1)
         # targets = ToOneHot2D(targets)
         
-        inputs = TRANSFORM_IMAGE(inputs)
+        # inputs = TRANSFORM_IMAGE(inputs)
 
         # Zeroing The Gradients
         optimizer.zero_grad()
 
 
         ##! --------------- Forward Pass --------------- !##
+        model.train() # Train Mode
         outputs = model(inputs)["out"]
         class_indices = torch.argmax(outputs, dim=1)
 
 
         #! Show Prediction
-        with torch.no_grad():
-            image:np.ndarray = inputs[0][1:4, :, :].permute(1, 2, 0).cpu().numpy()
-            image = (image - image.min()) / (image.max() - image.min())
+        # with torch.no_grad():
+        #     image:np.ndarray = inputs[0][1:4, :, :].permute(1, 2, 0).cpu().numpy()
+        #     image = (image - image.min()) / (image.max() - image.min())
 
-            fig, axs = plt.subplots(1, 2)
-            axs[0].imshow(image, cmap="viridis")
-            axs[1].imshow(class_indices[0].cpu().numpy(), cmap="viridis")
-            plt.tight_layout()
-        plt.show()
+        #     fig, axs = plt.subplots(1, 2)
+        #     axs[0].imshow(image, cmap="viridis")
+        #     axs[1].imshow(class_indices[0].cpu().numpy(), cmap="viridis")
+        #     plt.tight_layout()
+        # plt.show()
 
-        break
+        # break
 
 
         # Loss
@@ -300,14 +310,44 @@ if "__main__" == __name__:
 
         ##! --------------- Evaluate --------------- !##
         with torch.no_grad():
-            class_indices = torch.argmax(outputs, dim=1)
-            targets = targets.squeeze(1)
-            
-            # Accuracy
+            #! Accuracy
             accuracy = 100 * (class_indices == targets).float().mean()
             # accuracy = 100*((class_indices.flatten() == targets.flatten()).sum() / PATCH_SIZE**2 /inputs.size(0))   # Pixel Accuracy
             totalAccuracy += accuracy.item()
-            print(f"Epoch {step+1}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy.item()}, Average Accuracy: {totalAccuracy/(step+1)}")
+            print(f"Step {step+1}, Train Loss: {loss.item()/BATCH_SIZE}, Train Accuracy: {accuracy.item()}, Average Accuracy: {totalAccuracy/(step+1)}")
+
+
+            #! Validation
+            if (step+1) % VAL_INTERVAL == 0:
+                totalValAccuracy = 0
+                model.eval() # Evaluate Mode
+                for val_step, (inputs, targets) in enumerate(VAL_LOADER):
+                    inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+                    targets = ChangeMaskOrder(targets, classes)
+
+                    # Evaluate
+                    outputs = model(inputs)["out"]
+                    class_indices = torch.argmax(outputs, dim=1)
+                    targets = targets.squeeze(1)
+                    valAccuracy = 100 * (class_indices == targets).float().mean()
+                    totalValAccuracy += valAccuracy.item()
+                print(f"Step {step+1}, Val Accuracy: {totalValAccuracy / len(VAL_LOADER)}")
+                wandb.log({"val_accuracy": totalValAccuracy / len(VAL_LOADER)})
+
+
+                #! WBVisualize
+                inputs: torch.Tensor
+                image:np.ndarray = inputs[0][1:4, :, :].permute(1, 2, 0).cpu().numpy()
+                image = (image - image.min()) / (image.max() - image.min())
+                wb_image = WBMask(
+                    image*255,
+                    class_indices[0].cpu().numpy(),
+                    targets[0].cpu().numpy()
+                )
+                result_images+=[wb_image]
+                wandb.log({"Segmentation Visualization": result_images})
+                result_images.clear()
+
 
             # Wandb
             if _ActivateWB:
@@ -315,19 +355,8 @@ if "__main__" == __name__:
                     wandb.log({
                         "epoch": step,
                         "train_loss": loss.item() / BATCH_SIZE,
-                        "train_accuracy": accuracy
+                        "batch_accuracy": accuracy
                     })
-                    inputs: torch.Tensor
-                    if (1+step) % 50 == 0:
-                        image:np.ndarray = inputs[0][1:4, :, :].permute(1, 2, 0).cpu().numpy()
-                        image = (image - image.min()) / (image.max() - image.min())
-                        wb_image = WBMask(
-                            image*255,
-                            class_indices[0].cpu().numpy(),
-                            targets[0].cpu().numpy()
-                        )
-                        result_images+=[wb_image]
-
                 except Exception as e:
                     print(e)
 
@@ -338,10 +367,6 @@ if "__main__" == __name__:
                 torch.save(model.state_dict(), f"./Weight/DeepLabv3/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
                 if _ActivateWB:
                     wandb.save(f"./data/wandb/weight/deeplabv3_v1_{random_number}_{step}_{date_time_now}.pth")
-
-            if (1+step) % 300 == 0:
-                wandb.log({"Segmentation Visualization": result_images})
-                result_images.clear()
 
     
     ##! --------------- Finalize --------------- !##

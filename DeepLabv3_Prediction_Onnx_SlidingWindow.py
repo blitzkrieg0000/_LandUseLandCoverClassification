@@ -10,7 +10,8 @@ import torch
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-model_path = "./Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.onnx"
+model_path = "Weight/DeepLabv3/deeplabv3_v1_701_16800_19.08.2024_21.52.32.onnx"
+
 
 def FindPrimarySource(bands):
     """
@@ -47,11 +48,11 @@ band_list = [
     "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2/data/Base/raster/L1C_2023_12_01_B12.tif"
 ]
 
-# band_list = [
-#     "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_10m_RGB.tif",
-#     "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_10m_IR.tif",
-#     "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_20m.tif",
-# ]
+band_list = [
+    "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_10m_RGB.tif",
+    "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_10m_IR.tif",
+    "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_20m.tif",
+]
 
 
 bands = []
@@ -101,7 +102,7 @@ for x in range(0, height - window_size + 1, stride):
 
 
 # Normalize input image for visualization
-raster = rasterSource[:, :, 1:4]
+raster = rasterSource[:, :, :3]
 image = (raster - raster.min()) / (raster.max() - raster.min()) * 2.5
 
 

@@ -22,7 +22,7 @@ from rastervision.pytorch_learner import (
     SemanticSegmentationRandomWindowGeoDataset,
     SemanticSegmentationSlidingWindowGeoDataset,
     SemanticSegmentationVisualizer)
-from torch.utils.data import DataLoader, Dataset, Sampler
+from torch.utils.data import DataLoader, Dataset, Sampler, Subset, random_split
 
 from Tool.DataStorage import GetIndexDatasetPath
 from Tool.Util import (CrateDatasetIndexFile, DataSourceMeta, FilePath,
@@ -48,6 +48,7 @@ class SegmentationDatasetConfig(BaseModel):
     StrideSize:Annotated[int, "Sliding Window Stride Size"]=112
     ChannelOrder:Annotated[List[int], "Channel Order"]=None
     DataFilter:Annotated[List[str], "Data Filter"]=None
+
 
 
 class SegmentationDataset(Dataset):
@@ -250,7 +251,6 @@ class SpectralSegmentationDataset(SegmentationDataset):
             self.GeoDatasetCache.Add(_data.Scene, geoDataset)              
         
 
-
         #! Get Next
         data = label = None
         if self.RandomPatch:
@@ -379,6 +379,17 @@ class SpectralSegmentationDataset(SegmentationDataset):
                 )
 
 
+def worker_init_fn(worker_id):
+    worker_info = torch.utils.data.get_worker_info()
+    dataset = worker_info.dataset
+    dataset.set_worker_info(worker_id, worker_info.num_workers)
+
+
+def custom_collate_fn(batch):
+    data, label = zip(*batch)
+    return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
+
+
 def ShowDatasetViaVisualizer(dataset):
     vis = SemanticSegmentationVisualizer(class_names=["background", "foreground"], class_colors=["black", "white"])
     x, y = vis.get_batch(dataset, 4)
@@ -441,101 +452,63 @@ def VisualizePrediction(buffer, mask, predicted):
     plt.show()
 
 
-def worker_init_fn(worker_id):
-    worker_info = torch.utils.data.get_worker_info()
-    dataset = worker_info.dataset
-    dataset.set_worker_info(worker_id, worker_info.num_workers)
-
-
-def custom_collate_fn(batch):
-    data, label = zip(*batch)
-    return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
-
-
-# os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
-# DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
-
-DATASET_PATH = "data/dataset/SeasoNet/"
-
-dsConfig = SegmentationDatasetConfig(
-    ClassNames=["background", "excavation_area"],
-    ClassColors=["lightgray", "darkred"],
-    NullClass="background",
-    MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-    PatchSize=(120, 120),
-    PaddingSize=0,
-    Shuffle=True,
-    Epoch=5,
-    DatasetRootPath=DATASET_PATH,
-    RandomPatch=False,
-    BatchDataChunkNumber=16,
-    BatchSize=16,
-    DropLastBatch=True,
-    # ChannelOrder=[1,2,3,7],
-    DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"]
-)
-
-
-dataset = SpectralSegmentationDataset(dsConfig)
-
-customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
-
-
-DATALOADER = DataLoader(
-    dataset,
-    batch_sampler=customBatchSampler,
-    num_workers=2,
-    persistent_workers=False, 
-    pin_memory=True,
-    collate_fn=custom_collate_fn,
-    # multiprocessing_context = torch.multiprocessing.get_context("spawn")
-)
 
 if "__main__" == __name__:
-    print("Main Process Id:", os.getpid())
+    # os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
+    # DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
 
-    for i, (inputs, targets) in enumerate(DATALOADER):
-        inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-        print("\n", "-"*10)
-        print(f"Batch: {i}", inputs.shape, targets.shape)
-        print("-"*10, "\n")
-        print(f"Batch: {i}")
+    DATASET_PATH = "data/dataset/SeasoNet/"
+    dsConfig = SegmentationDatasetConfig(
+        ClassNames=["background", "excavation_area"],
+        ClassColors=["lightgray", "darkred"],
+        NullClass="background",
+        MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+        PatchSize=(120, 120),
+        PaddingSize=0,
+        Shuffle=True,
+        Epoch=5,
+        DatasetRootPath=DATASET_PATH,
+        RandomPatch=False,
+        BatchDataChunkNumber=16,
+        BatchSize=16,
+        DropLastBatch=True,
+        # ChannelOrder=[1,2,3,7],
+        DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"]
+    )
+
+    dataset = SpectralSegmentationDataset(dsConfig)
+    valRatio = 0.0009
+    testRatio = 0.05
+    trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
+    print(len(trainset), len(valset), len(testset))
+
+
+    customBatchSampler = CustomBatchSampler(trainset, config=dsConfig)
+    TRAIN_LOADER = DataLoader(
+        trainset,
+        batch_sampler=customBatchSampler,
+        num_workers=2,
+        persistent_workers=False, 
+        pin_memory=True,
+        collate_fn=custom_collate_fn,
+        # multiprocessing_context = torch.multiprocessing.get_context("spawn")
+    )
+    
+    VAL_LOADER = DataLoader(valset, batch_size=1)
+
+
+    print("Main Process Id:", os.getpid())
+    # for i, (inputs, targets) in enumerate(TRAIN_LOADER):
+    #     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+    #     print("\n", "-"*10)
+    #     print(f"Batch: {i}", inputs.shape, targets.shape)
+    #     print("-"*10, "\n")
+    #     print(f"Batch: {i}")
 
     #! VisualizeData
-    # VisualizeData(DATALOADER)
+    VisualizeData(VAL_LOADER)
     
     
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
