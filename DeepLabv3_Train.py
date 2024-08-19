@@ -4,6 +4,8 @@ import os
 import sys
 import time
 
+from matplotlib import pyplot as plt
+
 from Model.DeepLabv3 import DeepLabv3
 from Model.Loss import DiceLoss
 from Tool.Const import RGB_COLORS
@@ -184,7 +186,9 @@ TRANSFORM_IMAGE = tranformsv2.Compose([NormalizeSentinel2Transform()])
 # =================================================================================================================== #
 model = DeepLabv3(input_channels=NUM_CHANNELS, segmentation_classes=NUM_CLASSES)
 model = model.to(DEVICE)
-model.train()
+
+# model.train()
+model.eval()
 
 ##! --------------- Load Weights --------------- !##
 # %87 Acc => Weight/DeepLabv3/deeplabv3_v1_128_6000_18.08.2024_13.48.38.pth
@@ -267,7 +271,23 @@ if "__main__" == __name__:
 
         ##! --------------- Forward Pass --------------- !##
         outputs = model(inputs)["out"]
-        
+        class_indices = torch.argmax(outputs, dim=1)
+
+
+        #! Show Prediction
+        with torch.no_grad():
+            image:np.ndarray = inputs[0][1:4, :, :].permute(1, 2, 0).cpu().numpy()
+            image = (image - image.min()) / (image.max() - image.min())
+
+            fig, axs = plt.subplots(1, 2)
+            axs[0].imshow(image, cmap="viridis")
+            axs[1].imshow(class_indices[0].cpu().numpy(), cmap="viridis")
+            plt.tight_layout()
+        plt.show()
+
+        break
+
+
         # Loss
         loss = cross_entropy_loss_fn(outputs, targets) + dice_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
 
