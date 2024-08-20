@@ -4,12 +4,9 @@ import os
 import re
 import sys
 
-from Tool.Base import LimitedCache
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import random
-from collections import deque
 from functools import reduce
 from typing import Annotated, List, Set, Tuple
 
@@ -26,10 +23,10 @@ from rastervision.pytorch_learner import (
     SemanticSegmentationVisualizer)
 from torch.utils.data import DataLoader, Dataset, Sampler, Subset, random_split
 
+from Tool.Base import LimitedCache
 from Tool.DataStorage import GetIndexDatasetPath
 from Tool.Util import (CrateDatasetIndexFile, DataSourceMeta, FilePath,
                        ReadDatasetFromIndexFile)
-
 
 # =================================================================================================================== #
 #! CONSTS
@@ -58,8 +55,7 @@ class SegmentationDatasetConfig(BaseModel):
     StrideSize: Annotated[int, "Sliding Window Stride Size"] = 112
     ChannelOrder: Annotated[List[int], "Channel Order"] = None
     DataFilter: Annotated[List[str], "Data Filter"] = None
-
-
+    
 
 class SegmentationDatasetBase(Dataset):
     def __init__(self, config: SegmentationDatasetConfig):
@@ -67,7 +63,7 @@ class SegmentationDatasetBase(Dataset):
         self.Config = config
         self.ExpiredScenes: Set[str]                 # Tamamen tüketilmiş scene'leri tutan set
         self.GeoDatasetCache: LimitedCache           # Cache
-
+        self.BatchRepeatDataSegment: List[int]        # [1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]
 
 
 class SegmentationBatchSamplerMeta(type):
@@ -82,7 +78,7 @@ class SegmentationBatchSamplerBase(Sampler, metaclass=SegmentationBatchSamplerMe
         self.Config: SegmentationDatasetConfig = data_source.Config
         self.DataSource = data_source
         self.Indices = list(range(len(self.DataSource)))
-        __class__.DataChunkRepeatCounts(self.Config.BatchSize, self.Config.BatchDataChunkNumber)
+        data_source.BatchRepeatDataSegment = __class__.DataChunkRepeatCounts(self.Config.BatchSize, self.Config.BatchDataChunkNumber)
         self.Index = -1
         self.EpochCounter = 0
 
@@ -93,7 +89,8 @@ class SegmentationBatchSamplerBase(Sampler, metaclass=SegmentationBatchSamplerMe
         chunkSize = torch.clamp(torch.tensor(batch_data_chunk_number), 1, batch_size)
         chunks = torch.chunk(torch.arange(batch_size), chunkSize) 
         __class__.BatchRepeatDataSegment = list(map(len, chunks))
-
+        return __class__.BatchRepeatDataSegment
+        
 
     def __len__(self):
         return self.Config.Epoch if self.Config.RandomPatch else len(self.DataSource)
@@ -105,11 +102,19 @@ class SegmentationBatchSamplerBase(Sampler, metaclass=SegmentationBatchSamplerMe
         return self
 
 
+    def __next__(self):
+        self.Index+=1
+        self.CheckStoppingConditions()
+        indexes = self.PrepareBatchIndexes()
+        return indexes
+
+
     def CheckStoppingConditions(self):
         if self.Config.RandomPatch and self.Index >= self.__len__():      # Sadece Random Patch ise belirli bir epoch sayısı kadar batchler için index üretir.
             print("Random Patch Done")
             raise StopIteration
         
+        # [1 1 1 1 2 2 2 2]
         elif len(self.DataSource.ExpiredScenes)>=len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
             self.DataSource.ExpiredScenes.clear()
             self.EpochCounter += 1
@@ -119,7 +124,7 @@ class SegmentationBatchSamplerBase(Sampler, metaclass=SegmentationBatchSamplerMe
                 raise StopIteration
 
 
-    def RandomChoiceIndexes(self):
+    def PrepareBatchIndexes(self):
         # Random Patch
         new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes)
     
@@ -128,23 +133,26 @@ class SegmentationBatchSamplerBase(Sampler, metaclass=SegmentationBatchSamplerMe
             size=len(self.__class__.BatchRepeatDataSegment), # Hangi değişken
             replace=len(new_indices) < len(SegmentationBatchSampler.BatchRepeatDataSegment)
         )          
-        return choices
+        return np.repeat(choices, SegmentationBatchSampler.BatchRepeatDataSegment)
+
 
 
 class SegmentationBatchSampler(SegmentationBatchSamplerBase):
     def __init__(self, data_source: SegmentationDatasetBase):
         super().__init__(data_source)
+    
+
+    def __iter__(self):
+        return super().__iter__()
 
 
     def __next__(self):
-        self.Index+=1
-        self.CheckStoppingConditions()
-        choices = self.RandomChoiceIndexes()
-        return np.repeat(choices, SegmentationBatchSampler.BatchRepeatDataSegment)  
+        indexes = super().__next__()
+        return indexes
 
 
 
-class TrackableIterator():
+class TrackableGeoIterator():
     """GeoSlider veya Random GeoIterator için indis takibi yapan bir sınıftır."""
     def __init__(self, iterator, id, cycle=False, margin=None):
         self.Id = id
@@ -152,7 +160,8 @@ class TrackableIterator():
         self._Expired = False
         self._Cycle = cycle
         self.Iterator = iterator
-        self.margin = margin or max(SegmentationBatchSampler.BatchRepeatDataSegment)
+        self.margin = margin
+
 
     def __iter__(self):
         return self
@@ -211,6 +220,7 @@ class SpectralSegmentationDataset(SegmentationDatasetBase):
         self.ExpiredScenes = set()
         self.start_idx = 0
         self.end_idx = -1
+        self.IteratorMargin = max(self.BatchRepeatDataSegment)
 
 
     def __len__(self):
@@ -231,10 +241,9 @@ class SpectralSegmentationDataset(SegmentationDatasetBase):
         print(f"SpectralSegmentationDataset:-> index: {idx}, scene: {_data.Scene}, pid: {os.getpid()}")
         if geoDataset is None:
             geoDataset = self.LoadData(_data)
-            geoDataset = TrackableIterator(geoDataset, idx, cycle=True)
+            geoDataset = TrackableGeoIterator(geoDataset, idx, cycle=True, margin=self.IteratorMargin)
             self.GeoDatasetCache.Add(_data.Scene, geoDataset)              
         
-
         #! Get Next
         data = label = None
         if self.RandomPatch:
@@ -259,7 +268,7 @@ class SpectralSegmentationDataset(SegmentationDatasetBase):
         self.end_idx = (self.worker_id + 1) * self.segment_size if self.worker_id != self.num_workers - 1 else len(self.data)
 
 
-    def CheckExpiring(self, geoDataset:TrackableIterator):
+    def CheckExpiring(self, geoDataset:TrackableGeoIterator):
         if geoDataset._Expired:
             self.ExpiredScenes.add(geoDataset.Id)
             # Reset Index
@@ -468,6 +477,7 @@ if "__main__" == __name__:
 
 
     customBatchSampler = SegmentationBatchSampler(trainset, config=dsConfig)
+
     TRAIN_LOADER = DataLoader(
         trainset,
         batch_sampler=customBatchSampler,
