@@ -10,7 +10,7 @@ import torch
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-model_path = "Weight/DeepLabv3/deeplabv3_v1_701_16800_19.08.2024_21.52.32.onnx"
+model_path = "./Weight/DeepLabv3/deeplabv3_v1.onnx"
 
 
 def FindPrimarySource(bands):
@@ -48,11 +48,11 @@ band_list = [
     "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2/data/Base/raster/L1C_2023_12_01_B12.tif"
 ]
 
-band_list = [
-    "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_10m_RGB.tif",
-    "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_10m_IR.tif",
-    "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_20m.tif",
-]
+# band_list = [
+#     "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_10m_RGB.tif",
+#     "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_10m_IR.tif",
+#     "/home/blitzkrieg/Downloads/spring/grid1/32UND_20180505T103021_52_996058_9_080234/32UND_20180505T103021_52_996058_9_080234_20m.tif",
+# ]
 
 
 bands = []
@@ -81,7 +81,7 @@ def process_window(x, y, window_size, model_session):
     chip = np.transpose(chip, (0, 3, 1, 2))
 
     #! Inference Model
-    chip = chip / 10000.0
+    # chip = chip / 10000.0
     result = model_session.run([output_name], {input_name: chip})
     output = result[0]
     return output, chip
