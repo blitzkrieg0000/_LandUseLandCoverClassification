@@ -202,7 +202,7 @@ model.train()
 ##! --------------- Load Weights --------------- !##
 # %87 Acc => Weight/DeepLabv3/deeplabv3_v1_128_6000_18.08.2024_13.48.38.pth
 # %94 Acc => Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.pth
-model.load_state_dict(torch.load("Weight/DeepLabv3/deeplabv3_v1_717_7200_20.08.2024_02.03.31.pth"))
+# model.load_state_dict(torch.load("Weight/DeepLabv3/deeplabv3_v1.pth"))
 
 ## --------------- Wandb Watch --------------- !##
 # wandb.watch(MODEL, log="all")

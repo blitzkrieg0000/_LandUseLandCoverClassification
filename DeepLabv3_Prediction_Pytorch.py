@@ -9,7 +9,7 @@ from Model.DeepLabv3 import DeepLabv3
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model_path = "Weight/DeepLabv3/deeplabv3_v1_701_16800_19.08.2024_21.52.32.pth"
+model_path = "Weight/DeepLabv3/deeplabv3_v1.pth"
 
 
 
@@ -96,7 +96,7 @@ chip = chip.unsqueeze(0).transpose_(-2, -1).transpose_(-3, -2)
 
 
 #! Inference Model
-chip = TRANSFORM_IMAGE(chip)
+# chip = TRANSFORM_IMAGE(chip)
 output = model(chip)["out"]
 output = torch.argmax(output, axis=1)
 
