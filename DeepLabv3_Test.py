@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights, deeplabv3_resnet50)
 from torchvision.transforms import v2 as tranformsv2
 
-from Dataset.RVDataset import (CustomBatchSampler, SegmentationDatasetConfig,
+from Dataset.RVDataset import (SegmentationBatchSampler, SegmentationDatasetConfig,
                                SpectralSegmentationDataset, VisualizePrediction, custom_collate_fn)
 from Tool.Base import ChangeMaskOrder
 from Tool.DataStorage import GetIndexDatasetPath
@@ -53,7 +53,7 @@ dsConfig = SegmentationDatasetConfig(
 )
 
 dataset = SpectralSegmentationDataset(dsConfig)
-customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
+customBatchSampler = SegmentationBatchSampler(dataset, config=dsConfig)
 
 print("Main Process Id:", os.getpid())
 DATALOADER = DataLoader(

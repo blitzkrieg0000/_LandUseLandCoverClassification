@@ -4,6 +4,8 @@ import os
 import re
 import sys
 
+from Tool.Base import LimitedCache
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import random
@@ -28,73 +30,118 @@ from Tool.DataStorage import GetIndexDatasetPath
 from Tool.Util import (CrateDatasetIndexFile, DataSourceMeta, FilePath,
                        ReadDatasetFromIndexFile)
 
+
+# =================================================================================================================== #
+#! CONSTS
+# =================================================================================================================== #
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+
+# =================================================================================================================== #
+#! CLASS
+# =================================================================================================================== #
 class SegmentationDatasetConfig(BaseModel):
     ClassNames: Annotated[List[str], "Class Names"]
     ClassColors: Annotated[List[str| tuple], "Class Colors"]
-    NullClass: Annotated[str, "Null Class"]=None
+    NullClass: Annotated[str, "Null Class"] = None
     MaxWindowsPerScene: Annotated[int | float | None, "Max Windows Per Scene"]
-    DatasetRootPath:Annotated[str, "Dataset Index File"]
-    PatchSize:Annotated[Tuple[int, int] | int, "Patch Size"]
-    PaddingSize:Annotated[int, "Padding Size"]
-    Shuffle:Annotated[bool, "Shuffle"]  
-    Epoch:Annotated[int, "Epoch"]=None
-    RandomPatch:Annotated[bool, "Random Patch"]=True
-    BatchDataChunkNumber:Annotated[int, "Batch Dataset Repeat Number"]
-    BatchSize:Annotated[int, "Batch Size"]
-    DropLastBatch:Annotated[bool, "Drop Last Batch"]=True
-    StrideSize:Annotated[int, "Sliding Window Stride Size"]=112
-    ChannelOrder:Annotated[List[int], "Channel Order"]=None
-    DataFilter:Annotated[List[str], "Data Filter"]=None
+    DatasetRootPath: Annotated[str, "Dataset Index File"]
+    PatchSize: Annotated[Tuple[int, int] | int, "Patch Size"]
+    PaddingSize: Annotated[int, "Padding Size"]
+    Shuffle: Annotated[bool, "Shuffle"]  
+    Epoch: Annotated[int, "Epoch"] = None
+    RandomPatch: Annotated[bool, "Random Patch"] = True
+    BatchDataChunkNumber: Annotated[int, "Batch Dataset Chunk Number"]
+    BatchSize: Annotated[int, "Batch Size"]
+    DropLastBatch: Annotated[bool, "Drop Last Batch"] = True
+    StrideSize: Annotated[int, "Sliding Window Stride Size"] = 112
+    ChannelOrder: Annotated[List[int], "Channel Order"] = None
+    DataFilter: Annotated[List[str], "Data Filter"] = None
 
 
 
-class SegmentationDataset(Dataset):
-    def __init__(self):
-        self.GeoDatasetCache: LimitedCache
-        self.RandomPatch: SegmentationDatasetConfig
-        self.ExpiredScenes: Set[str]
+class SegmentationDatasetBase(Dataset):
+    def __init__(self, config: SegmentationDatasetConfig):
+        """Segmentasyon datasetleri için bir Base classtır."""
+        self.Config = config
+        self.ExpiredScenes: Set[str]                 # Tamamen tüketilmiş scene'leri tutan set
+        self.GeoDatasetCache: LimitedCache           # Cache
 
 
 
-class LimitedCache():
-    def __init__(self, max_size_mb: int=1024, max_items: int = 300):
-        self.cache = {}
-        self.order = deque()
-        self.max_size = max_size_mb * 1024 * 1024
-        self.current_size = 0
-        self.max_items = max_items
+class SegmentationBatchSamplerMeta(type):
+    def __init__(cls, name, bases, attrs):
+        super().__init__(name, bases, attrs)
+        cls.BatchRepeatDataSegment = None
 
 
-    def __GetSize(self, item) -> int:
-        return sys.getsizeof(item)
+
+class SegmentationBatchSamplerBase(Sampler, metaclass=SegmentationBatchSamplerMeta):
+    def __init__(self, data_source: SegmentationDatasetBase):
+        self.Config: SegmentationDatasetConfig = data_source.Config
+        self.DataSource = data_source
+        self.Indices = list(range(len(self.DataSource)))
+        __class__.DataChunkRepeatCounts(self.Config.BatchSize, self.Config.BatchDataChunkNumber)
+        self.Index = -1
+        self.EpochCounter = 0
+
+
+    @staticmethod
+    def DataChunkRepeatCounts(batch_size, batch_data_chunk_number):
+        """[1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]"""
+        chunkSize = torch.clamp(torch.tensor(batch_data_chunk_number), 1, batch_size)
+        chunks = torch.chunk(torch.arange(batch_size), chunkSize) 
+        __class__.BatchRepeatDataSegment = list(map(len, chunks))
+
+
+    def __len__(self):
+        return self.Config.Epoch if self.Config.RandomPatch else len(self.DataSource)
+
+
+    def __iter__(self):
+        if self.Config.Shuffle:
+            random.shuffle(self.Indices)
+        return self
+
+
+    def CheckStoppingConditions(self):
+        if self.Config.RandomPatch and self.Index >= self.__len__():      # Sadece Random Patch ise belirli bir epoch sayısı kadar batchler için index üretir.
+            print("Random Patch Done")
+            raise StopIteration
+        
+        elif len(self.DataSource.ExpiredScenes)>=len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
+            self.DataSource.ExpiredScenes.clear()
+            self.EpochCounter += 1
+
+            if self.EpochCounter >= self.Config.Epoch:
+                # self.EpochCounter = 0
+                raise StopIteration
+
+
+    def RandomChoiceIndexes(self):
+        # Random Patch
+        new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes)
     
+        choices = np.random.choice(
+            new_indices,
+            size=len(self.__class__.BatchRepeatDataSegment), # Hangi değişken
+            replace=len(new_indices) < len(SegmentationBatchSampler.BatchRepeatDataSegment)
+        )          
+        return choices
 
-    def Get(self, key):
-        return self.cache.get(key)
+
+class SegmentationBatchSampler(SegmentationBatchSamplerBase):
+    def __init__(self, data_source: SegmentationDatasetBase):
+        super().__init__(data_source)
 
 
-    def Add(self, key, value):
-        item_size = self.__GetSize(key) + self.__GetSize(value)
+    def __next__(self):
+        self.Index+=1
+        self.CheckStoppingConditions()
+        choices = self.RandomChoiceIndexes()
+        return np.repeat(choices, SegmentationBatchSampler.BatchRepeatDataSegment)  
 
-        # Yeni elemanı eklemeden önce mevcut öğe sayısını kontrol et
-        while len(self.order) >= self.max_items or self.current_size + item_size > self.max_size:
-            if len(self.order) == 0:
-                # Eğer deque boşsa, çık
-                break
-
-            # En eski key-value çiftini sil
-            oldest_key = self.order.popleft()
-            oldest_value = self.cache.pop(oldest_key)
-            self.current_size -= (self.__GetSize(oldest_key) + self.__GetSize(oldest_value))
-
-        # Yeni key-value çiftini ekle
-        self.cache[key] = value
-        self.order.append(key)
-        self.current_size += item_size
-        print("Cache Size: ", self.current_size)
 
 
 class TrackableIterator():
@@ -105,7 +152,7 @@ class TrackableIterator():
         self._Expired = False
         self._Cycle = cycle
         self.Iterator = iterator
-        self.margin = margin or max(CustomBatchSampler.BatchRepeatDataSegment)
+        self.margin = margin or max(SegmentationBatchSampler.BatchRepeatDataSegment)
 
     def __iter__(self):
         return self
@@ -148,72 +195,9 @@ class TrackableIterator():
 
 
 
-class CustomBatchSampler(Sampler):
-    BatchRepeatDataSegment = None
-    def __init__(self, data_source: SegmentationDataset, config: SegmentationDatasetConfig):
-        self.Shuffle = config.Shuffle
-        self.RandomPatch = config.RandomPatch
-        self.DataSource = data_source
-        self.BatchSize = config.BatchSize
-        self._DropLast = config.DropLastBatch
-        self.Epoch = config.Epoch
-        self.Index = -1
-        self.EpochCounter = 0
-        self.Indices = list(range(len(self.DataSource)))
-        CustomBatchSampler.RepeatedDataSegmentList(config.BatchSize, config.BatchDataChunkNumber)
-
-
-    @staticmethod
-    def RepeatedDataSegmentList(batch_size, batch_data_chunk_number):
-        """[1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]"""
-        chunkSize = torch.clamp(torch.tensor(batch_data_chunk_number), 1, batch_size)
-        chunks = torch.chunk(torch.arange(batch_size), chunkSize) 
-        CustomBatchSampler.BatchRepeatDataSegment = list(map(len, chunks))
-
-
-    def __len__(self):
-        return self.Epoch if self.RandomPatch else len(self.DataSource)
-
-
-    def __iter__(self):
-        if self.Shuffle:
-            random.shuffle(self.Indices)
-        return self
-
-
-    def __next__(self):
-        if len(self.DataSource.ExpiredScenes)>=len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
-            self.DataSource.ExpiredScenes.clear()
-            self.EpochCounter += 1
-
-            if self.EpochCounter >= self.Epoch:
-                # self.EpochCounter = 0
-                raise StopIteration
-
-
-        # Random Patch
-        new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes)
-    
-        choices = np.random.choice(
-            new_indices,
-            size=len(CustomBatchSampler.BatchRepeatDataSegment),
-            replace=len(new_indices) < len(CustomBatchSampler.BatchRepeatDataSegment)
-        )          
-    
-        self.Index+=1
-
-        # Sadece Random Patch ise belirli bir epoch sayısı kadar batchler için index üretir.
-        if self.RandomPatch and self.Index >= self.__len__():
-            print("Random Patch Done")
-            raise StopIteration
-        
-        return np.repeat(choices, CustomBatchSampler.BatchRepeatDataSegment)  
-
-
-class SpectralSegmentationDataset(SegmentationDataset):
+class SpectralSegmentationDataset(SegmentationDatasetBase):
     def __init__(self, config: SegmentationDatasetConfig):
-        super().__init__()
-        self.Config = config
+        super().__init__(config)
         self.ClassConfig = ClassConfig(names=config.ClassNames, colors=config.ClassColors, null_class=config.NullClass)
         self.MaxWindowsPerScene = config.MaxWindowsPerScene
         self.StrideSize = config.StrideSize
@@ -483,7 +467,7 @@ if "__main__" == __name__:
     print(len(trainset), len(valset), len(testset))
 
 
-    customBatchSampler = CustomBatchSampler(trainset, config=dsConfig)
+    customBatchSampler = SegmentationBatchSampler(trainset, config=dsConfig)
     TRAIN_LOADER = DataLoader(
         trainset,
         batch_sampler=customBatchSampler,

@@ -28,7 +28,7 @@ from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
                                              deeplabv3_resnet50)
 from torchvision.transforms import v2 as tranformsv2
 
-from Dataset.RVDataset import (CustomBatchSampler, SegmentationDatasetConfig,
+from Dataset.RVDataset import (SegmentationBatchSampler, SegmentationDatasetConfig,
                                SpectralSegmentationDataset, VisualizeData,
                                custom_collate_fn)
 from Tool.Base import ChangeMaskOrder, GetTimeStampNow
@@ -163,7 +163,7 @@ testRatio = 0.05
 trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
 print(len(trainset), len(valset), len(testset))
 
-customBatchSampler = CustomBatchSampler(dataset, config=dsConfig)
+customBatchSampler = SegmentationBatchSampler(dataset, config=dsConfig)
 TRAIN_LOADER = DataLoader(
     dataset,
     batch_sampler=customBatchSampler,
