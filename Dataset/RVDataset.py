@@ -30,6 +30,8 @@ from Tool.Base import LimitedCache
 from Tool.Util import (DataSourceMeta)
 from multiprocessing import Manager
 
+random.seed(72)
+
 # =================================================================================================================== #
 #! CONSTS
 # =================================================================================================================== #
@@ -169,6 +171,7 @@ class SharedQueueSet():
 
 class SharedArtifacts():
 	ExpiredScenes = SharedQueueSet()
+	AvailableInSource = Manager().dict()
 
 
 class SegmentationDatasetConfig(BaseModel):
@@ -260,6 +263,7 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 		"""Segmentasyon datasetleri için bir Base classtır."""
 		self.Config = config
 		self.ExpiredScenes = shared_artifacts.ExpiredScenes
+		self.AvailableInSource = shared_artifacts.AvailableInSource
 
 		self.DatasetIndexMeta: List[DataSourceMeta]
 		self.GeoDatasetCache = LimitedCache(max_size_mb=512, max_items=100)
@@ -278,13 +282,17 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 
 
 	def __getitem__(self, idx):
+
+
+		# [0, 0, 0, 0, 1, 1 ,1, 1] 
+		# new_indices = list(set(self.Indices)-self.ExpiredScenes.ToSet())
+
+
 		# READ SOURCE META
 		_meta = self.GetIndexMetaById(idx)
 
 		# READ SCENE AND CACHE
 		geoDataset = self.ReadSceneDataByIndexMeta(_meta)         
-		
-		print(geoDataset.Available)
 		
 		#! GET NEXT DATA
 		data, label = self.GetNext(geoDataset, idx)
@@ -372,15 +380,17 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 
 	def GetIndexMetaById(self, idx):
 		idx %= len(self.DatasetIndexMeta)
-		_data: DataSourceMeta = self.DatasetIndexMeta[idx]
-		_data.Index = idx
-		return _data
+		_meta: DataSourceMeta = self.DatasetIndexMeta[idx]
+		_meta.Index = idx
+		return _meta
 
 
 	def CheckGeoIteratorSceneExpiring(self, geoDataset:TrackableGeoIterator):
 		if geoDataset.IsExpired():
 			self.ExpiredScenes.Add(geoDataset.Id)
 			geoDataset.Reset()
+
+		self.AvailableInSource[geoDataset.Id] = geoDataset.Available
 
 
 	def SetWorkerInfo(self, worker_id, num_workers):
@@ -421,14 +431,15 @@ class SegmentationBatchSamplerBase(Sampler):
 		self.Index = -1
 		self.RandomLimitCounter = 0
 
+		if self.Config.Shuffle:
+			random.shuffle(self.Indices)
+
 
 	def __len__(self):
 		return self.Config.RandomLimit if self.Config.RandomPatch else len(self.DataSource)
 
 
 	def __iter__(self):
-		if self.Config.Shuffle:
-			random.shuffle(self.Indices)
 		return self
 
 
@@ -455,26 +466,28 @@ class SegmentationBatchSamplerBase(Sampler):
 	def PrepareBatchIndexes(self):
 		# 0 => 11     % 3
 		# 1 => 12     % 4
-		
+	
 		# 0 => State => Available: min(4, 3) = 3  
 		# 1 => State => Available: min(4, 4) = 4
 		#7 => 1
 
-
 		# [0 0 0 0 1 1 1 1]
 		# [0 0 0 0 1 1 1 1]
 		# [0 0 0 0 1 1 1 1]
-
-		[]
-
 
 		new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes.ToSet())
 	
+
 		choices = np.random.choice(
 			new_indices,
 			size=len(self.Config.BatchRepeatDataSegment), # Hangi değişken
 			replace=len(new_indices) < len(self.Config.BatchRepeatDataSegment)
 		)
+
+		# recovery = []
+		# for id_choice, seg_count in zip(choices, self.Config.BatchRepeatDataSegment):
+		# 	self.DataSource.AvailableInSource[id_choice]
+
 		print(f"Sampler: {choices} x {self.Config.BatchRepeatDataSegment}")
 		return np.repeat(choices, self.Config.BatchRepeatDataSegment)
 
