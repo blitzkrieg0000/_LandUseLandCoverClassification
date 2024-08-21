@@ -354,7 +354,7 @@ class SegmentationBatchSamplerBase(Sampler):
 		self.DataSource = data_source
 		self.Indices = list(range(len(self.DataSource)))
 		self.Index = -1
-		self.RandomLimitCounterCounter = 0
+		self.RandomLimitCounter = 0
 
 
 	def __len__(self):
