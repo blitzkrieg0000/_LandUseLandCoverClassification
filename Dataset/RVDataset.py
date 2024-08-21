@@ -308,7 +308,7 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 			self.DatasetIndexMeta: List[DataSourceMeta] = GeoDataReader.ReadDatasetMetaFromIndexFile(self.Config.DatasetRootPath)
 		else:
 			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen geçerli bir veri okuma yöntemi tipi seçiniz: {self.DataReadType}")
-		self.DatasetIndexMeta = self.DatasetIndexMeta[:10]
+		# self.DatasetIndexMeta = self.DatasetIndexMeta[:10]
 		return self.DatasetIndexMeta
 
 
@@ -630,16 +630,13 @@ if "__main__" == __name__:
 	# for step, (inputs, targets) in enumerate(TRAIN_LOADER):
 	# 	print(f"=>Step: {step}", inputs.shape, targets.shape)
 
-	VisualizeData(TRAIN_LOADER)
-	
-	exit()
-	
+
 	valRatio = 0.0009
 	testRatio = 0.05
 	trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
 	print(len(trainset), len(valset), len(testset))
 
-	customBatchSampler = SegmentationBatchSampler(trainset)
+	customBatchSampler = SegmentationBatchSampler(dataset)
 
 	TRAIN_LOADER = DataLoader(
 		trainset,
