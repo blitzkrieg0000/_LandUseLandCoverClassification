@@ -191,7 +191,7 @@ class SegmentationDatasetConfig(BaseModel):
 	StrideSize: Annotated[int, "Sliding Window Stride Size"] = 112
 	ChannelOrder: Annotated[List[int], "Channel Order"] = None
 	DataFilter: Annotated[List[str], "Data Filter By File Name Regex"] = None
-
+	DataLoadLimit: Annotated[int, "Data Limiter"] = None
 
 	@property
 	def BatchRepeatDataSegment(self):
@@ -308,7 +308,10 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 			self.DatasetIndexMeta: List[DataSourceMeta] = GeoDataReader.ReadDatasetMetaFromIndexFile(self.Config.DatasetRootPath)
 		else:
 			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen geçerli bir veri okuma yöntemi tipi seçiniz: {self.DataReadType}")
-		# self.DatasetIndexMeta = self.DatasetIndexMeta[:10]
+		
+		if self.Config.DataLoadLimit:
+			self.DatasetIndexMeta = np.random.choice(self.DatasetIndexMeta, self.Config.DataLoadLimit, replace=False)
+
 		return self.DatasetIndexMeta
 
 
@@ -610,6 +613,7 @@ if "__main__" == __name__:
 		DropLastBatch=True,
 		# ChannelOrder=[1,2,3,7],
 		DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
+		DataLoadLimit=20
 	)
 
 	dataset = SpectralSegmentationDataset(dsConfig, SHARED_ARTIFACTS)
@@ -630,6 +634,10 @@ if "__main__" == __name__:
 	# for step, (inputs, targets) in enumerate(TRAIN_LOADER):
 	# 	print(f"=>Step: {step}", inputs.shape, targets.shape)
 
+	#! VisualizeData
+	VisualizeData(TRAIN_LOADER)
+
+	exit()
 
 	valRatio = 0.0009
 	testRatio = 0.05
