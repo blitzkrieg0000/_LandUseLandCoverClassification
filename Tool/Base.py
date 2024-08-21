@@ -78,7 +78,6 @@ class LimitedCache():
         self.cache[key] = value
         self.order.append(key)
         self.current_size += item_size
-        print("Cache Size: ", self.current_size)
 
 
 # =================================================================================================================== #

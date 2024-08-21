@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABCMeta
 from enum import Enum
 
+from multiprocessing import Manager
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -27,7 +28,7 @@ from torch.utils.data import DataLoader, Dataset, Sampler, random_split
 
 from Tool.Base import LimitedCache
 from Tool.Util import (DataSourceMeta)
-
+from multiprocessing import Manager
 
 # =================================================================================================================== #
 #! CONSTS
@@ -123,6 +124,53 @@ def VisualizePrediction(buffer, mask, predicted):
 # =================================================================================================================== #
 #! CLASS
 # =================================================================================================================== #
+class SharedQueueSet():
+	def __init__(self):
+		self.manager = Manager()
+		self.queue = self.manager.Queue()
+		self.items_set = self.manager.dict()  # Thread-safe dict to keep track of unique items
+
+	def Add(self, item):
+		"""Add an item to the set-like queue if it's not already present."""
+		if item not in self.items_set:
+			self.queue.put(item)
+			self.items_set[item] = True
+
+	def Get(self):
+		"""Get an item from the queue."""
+		item = self.queue.get()
+		self.items_set.pop(item, None)
+		return item
+
+
+	def ToSet(self):
+		"""Convert the queue to a set."""
+		return set(self.items_set.keys())
+
+
+	def __contains__(self, item):
+		"""Check if the item is in the set-like queue."""
+		return item in self.items_set
+
+	def __len__(self):
+		"""Return the number of unique items in the queue."""
+		return len(self.items_set)
+
+	def Empty(self):
+		"""Check if the queue is empty."""
+		return self.queue.empty()
+
+	def Clear(self):
+		"""Clear the queue and set."""
+		while not self.queue.empty():
+			self.queue.get_nowait()
+		self.items_set.clear()
+
+
+class SharedArtifacts():
+	ExpiredScenes = SharedQueueSet()
+
+
 class SegmentationDatasetConfig(BaseModel):
 	ClassNames: Annotated[List[str], "Class Names"]
 	ClassColors: Annotated[List[str| tuple], "Class Colors"]
@@ -140,7 +188,8 @@ class SegmentationDatasetConfig(BaseModel):
 	StrideSize: Annotated[int, "Sliding Window Stride Size"] = 112
 	ChannelOrder: Annotated[List[int], "Channel Order"] = None
 	DataFilter: Annotated[List[str], "Data Filter By File Name Regex"] = None
-	
+
+
 	@property
 	def BatchRepeatDataSegment(self):
 		return DataChunkRepeatCounts(self.BatchSize, self.BatchDataChunkNumber)
@@ -161,6 +210,21 @@ class SegmentationDatasetConfig(BaseModel):
 	@property
 	def DefaultLabelSourceConfig(self):
 		return ClassConfig(names=self.ClassNames, colors=self.ClassColors, null_class=self.NullClass)
+
+
+class SharedSet():
+    def __init__(self, shared_set):
+        self.SharedSet = shared_set
+
+    def Add(self, item):
+        self.SharedSet[item] = item
+
+    def Remove(self, item):
+        if item in self.SharedSet:
+            del self.SharedSet[item]
+
+    def IsIn(self, item):
+        return item in self.SharedSet
 
 
 class CustomSubset(Dataset):
@@ -192,13 +256,13 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 		IndexMetaFile=0
 
 
-	def __init__(self, config: SegmentationDatasetConfig):
+	def __init__(self, config: SegmentationDatasetConfig, shared_artifacts: SharedArtifacts):
 		"""Segmentasyon datasetleri için bir Base classtır."""
-		self.Config = config    
-		self.GeoDatasetCache: LimitedCache           # Cache
-		self.ExpiredScenes: Set[str] = set() # Tamamen tüketilmiş scene'leri tutan set
+		self.Config = config
+		self.ExpiredScenes = shared_artifacts.ExpiredScenes
+
 		self.DatasetIndexMeta: List[DataSourceMeta]
-		self.GeoDatasetCache = LimitedCache(max_size_mb=1024)
+		self.GeoDatasetCache = LimitedCache(max_size_mb=512, max_items=100)
 		
 		# Worker Info
 		self.StartIndex = 0
@@ -220,6 +284,8 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 		# READ SCENE AND CACHE
 		geoDataset = self.ReadSceneDataByIndexMeta(_meta)         
 		
+		print(geoDataset.Available)
+		
 		#! GET NEXT DATA
 		data, label = self.GetNext(geoDataset, idx)
 
@@ -234,7 +300,7 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 			self.DatasetIndexMeta: List[DataSourceMeta] = GeoDataReader.ReadDatasetMetaFromIndexFile(self.Config.DatasetRootPath)
 		else:
 			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen geçerli bir veri okuma yöntemi tipi seçiniz: {self.DataReadType}")
-		self.DatasetIndexMeta = self.DatasetIndexMeta[:1]
+		self.DatasetIndexMeta = self.DatasetIndexMeta[:10]
 		return self.DatasetIndexMeta
 
 
@@ -291,6 +357,7 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 			# Convert to GeoDataset
 			if self.Config.RandomPatch:
 				geoDataset = self.CreateRandomWindowGeoDatasetFromScene(scene)
+				print(len(geoDataset))
 			else:
 				geoDataset = self.CreateSlidingWindowGeoDatasetFromScene(scene) # Random vs Sliding
 
@@ -312,7 +379,7 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 
 	def CheckGeoIteratorSceneExpiring(self, geoDataset:TrackableGeoIterator):
 		if geoDataset.IsExpired():
-			self.ExpiredScenes.add(geoDataset.Id)
+			self.ExpiredScenes.Add(geoDataset.Id)
 			geoDataset.Reset()
 
 
@@ -373,29 +440,42 @@ class SegmentationBatchSamplerBase(Sampler):
 
 
 	def CheckStoppingConditions(self):
+		# TODO Multiprocess yaparken veri uzunluğu sabit kaldığından self.Index degeri artmazsa hata verebilir. Ancak batchsampler tek processte çalışır sorun olmayabilir.
 		if self.Config.RandomPatch and self.Index >= self.__len__():      # Sadece Random Patch ise belirli bir epoch sayısı kadar batchler için index üretir.
 			print("Random Patch Done")
 			raise StopIteration
 		
-		# [1 1 1 1 2 2 2 2]
 		elif len(self.DataSource.ExpiredScenes) >= len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
-			self.DataSource.ExpiredScenes.clear()
+			self.DataSource.ExpiredScenes.Clear()
 			self.RandomLimitCounter += 1
 
-			if self.RandomLimitCounter >= self.Config.RandomLimit:
-				# self.RandomLimitCounter = 0
-				raise StopIteration
+			raise StopIteration
 
 
 	def PrepareBatchIndexes(self):
-		# Random Patch
-		new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes)
+		# 0 => 11     % 3
+		# 1 => 12     % 4
+		
+		# 0 => State => Available: min(4, 3) = 3  
+		# 1 => State => Available: min(4, 4) = 4
+		#7 => 1
+
+
+		# [0 0 0 0 1 1 1 1]
+		# [0 0 0 0 1 1 1 1]
+		# [0 0 0 0 1 1 1 1]
+
+		[]
+
+
+		new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes.ToSet())
 	
 		choices = np.random.choice(
 			new_indices,
 			size=len(self.Config.BatchRepeatDataSegment), # Hangi değişken
 			replace=len(new_indices) < len(self.Config.BatchRepeatDataSegment)
-		)          
+		)
+		print(f"Sampler: {choices} x {self.Config.BatchRepeatDataSegment}")
 		return np.repeat(choices, self.Config.BatchRepeatDataSegment)
 
 
@@ -410,7 +490,6 @@ class TrackableGeoIterator():
 		self.Iterator = iterator
 		self.margin = margin
 
-
 	@property
 	def Margin(self):
 		if 0 != self.__len__() % self.margin:
@@ -418,7 +497,15 @@ class TrackableGeoIterator():
 		else:
 			return 0
 	
-	
+
+	@property
+	def Available(self) -> int:
+		if self.Index == -1:
+			return self.__len__()
+		
+		return self.__len__() - ((1 + (max(self.Index, 0) % self.__len__())))
+
+
 	def __iter__(self):
 		return self
 	
@@ -429,8 +516,8 @@ class TrackableGeoIterator():
 
 
 	def __len__(self):
-		return len(self.Iterator) 
-	
+		return len(self.Iterator)
+
 
 	def __getitem__(self, id):
 		"""For Sliding GeoDataset"""
@@ -477,8 +564,8 @@ class SegmentationBatchSampler(SegmentationBatchSamplerBase):
 
 
 class SpectralSegmentationDataset(SegmentationDatasetBase):
-	def __init__(self, config: SegmentationDatasetConfig):
-		super().__init__(config)
+	def __init__(self, config: SegmentationDatasetConfig, shared_artifacts: SharedArtifacts):
+		super().__init__(config, shared_artifacts)
 
 
 	def __getitem__(self, idx):
@@ -488,11 +575,12 @@ class SpectralSegmentationDataset(SegmentationDatasetBase):
 
 
 
-if "__main__" == __name__:
-	# os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
-	# DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
 
+
+if "__main__" == __name__:
 	DATASET_PATH = "data/dataset/SeasoNet/"
+	SHARED_ARTIFACTS=SharedArtifacts()
+
 	dsConfig = SegmentationDatasetConfig(
 		ClassNames=["background", "excavation_area"],
 		ClassColors=["lightgray", "darkred"],
@@ -502,25 +590,34 @@ if "__main__" == __name__:
 		PaddingSize=0,
 		Shuffle=True,
 		DatasetRootPath=DATASET_PATH,
-		RandomLimit=1,
+		RandomLimit=0,
 		RandomPatch=False,
 		BatchDataChunkNumber=16,
 		BatchSize=16,
 		DropLastBatch=True,
 		# ChannelOrder=[1,2,3,7],
-		DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"]
+		DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
 	)
 
-	dataset = SpectralSegmentationDataset(dsConfig)
+	dataset = SpectralSegmentationDataset(dsConfig, SHARED_ARTIFACTS)
 	
+	customBatchSampler = SegmentationBatchSampler(dataset)
+	
+	TRAIN_LOADER = DataLoader(
+		dataset,
+		batch_sampler=customBatchSampler,
+		num_workers=1,
+		persistent_workers=False,
+		pin_memory=True,
+		collate_fn=CustomCollateFN,
+		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
+	)
 
-	for i, (inputs, targets) in enumerate(dataset):
-		print("\n", "-"*10)
-		print(f"Batch: {i}", inputs.shape, targets.shape)
-		print("-"*10, "\n")
-		print(f"Batch: {i}")
-	
-	
+	# print("Dataset Len:", len(TRAIN_LOADER))
+	# for step, (inputs, targets) in enumerate(TRAIN_LOADER):
+	# 	print(f"=>Step: {step}", inputs.shape, targets.shape)
+
+	VisualizeData(TRAIN_LOADER)
 	
 	exit()
 	

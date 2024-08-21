@@ -27,3 +27,5 @@ class SegmentationDatasetConfig(BaseModel):
 
 config = SegmentationDatasetConfig()
 print(config.BatchRepeatDataSegment)
+
+print(-1%1)
