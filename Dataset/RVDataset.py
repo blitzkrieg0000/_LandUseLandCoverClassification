@@ -2,15 +2,13 @@ from __future__ import annotations
 
 from abc import ABCMeta
 from enum import Enum
+
 import os
 import sys
-
-from Dataset.FileReader import GeoDataReader
-
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+from Dataset.FileReader import GeoDataReader
 import random
-from functools import reduce
 from typing import Annotated, List, Set, Tuple
 
 import numpy as np
@@ -236,7 +234,7 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 			self.DatasetIndexMeta: List[DataSourceMeta] = GeoDataReader.ReadDatasetMetaFromIndexFile(self.Config.DatasetRootPath)
 		else:
 			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen geçerli bir veri okuma yöntemi tipi seçiniz: {self.DataReadType}")
-		
+		self.DatasetIndexMeta = self.DatasetIndexMeta[:1]
 		return self.DatasetIndexMeta
 
 
@@ -402,21 +400,6 @@ class SegmentationBatchSamplerBase(Sampler):
 
 
 
-class SegmentationBatchSampler(SegmentationBatchSamplerBase):
-	def __init__(self, data_source: SegmentationDatasetBase):
-		super().__init__(data_source)
-	
-
-	def __iter__(self):
-		return super().__iter__()
-
-
-	def __next__(self):
-		indexes = super().__next__()
-		return indexes
-
-
-
 class TrackableGeoIterator():
 	"""GeoSlider veya Random GeoIterator için indis takibi yapan bir sınıftır."""
 	def __init__(self, iterator, id, cycle=False, margin=None):
@@ -428,6 +411,14 @@ class TrackableGeoIterator():
 		self.margin = margin
 
 
+	@property
+	def Margin(self):
+		if 0 != self.__len__() % self.margin:
+			return self.margin - (self.__len__() % self.margin)
+		else:
+			return 0
+	
+	
 	def __iter__(self):
 		return self
 	
@@ -449,14 +440,6 @@ class TrackableGeoIterator():
 		return self.Iterator[self.Index % self.__len__()]
 
 
-	@property
-	def Margin(self):
-		if 0 != self.__len__() % self.margin:
-			return self.margin - (self.__len__() % self.margin)
-		else:
-			return 0
-
-
 	def CheckIndex(self):
 		if (self._Expired and not self._Cycle):
 			raise IndexError
@@ -475,6 +458,21 @@ class TrackableGeoIterator():
 	def Reset(self):
 		self.Index = -1
 		self._Expired = False
+
+
+
+class SegmentationBatchSampler(SegmentationBatchSamplerBase):
+	def __init__(self, data_source: SegmentationDatasetBase):
+		super().__init__(data_source)
+	
+
+	def __iter__(self):
+		return super().__iter__()
+
+
+	def __next__(self):
+		indexes = super().__next__()
+		return indexes
 
 
 
@@ -503,8 +501,8 @@ if "__main__" == __name__:
 		PatchSize=(120, 120),
 		PaddingSize=0,
 		Shuffle=True,
-		RandomLimit=1,
 		DatasetRootPath=DATASET_PATH,
+		RandomLimit=1,
 		RandomPatch=False,
 		BatchDataChunkNumber=16,
 		BatchSize=16,
@@ -514,6 +512,18 @@ if "__main__" == __name__:
 	)
 
 	dataset = SpectralSegmentationDataset(dsConfig)
+	
+
+	for i, (inputs, targets) in enumerate(dataset):
+		print("\n", "-"*10)
+		print(f"Batch: {i}", inputs.shape, targets.shape)
+		print("-"*10, "\n")
+		print(f"Batch: {i}")
+	
+	
+	
+	exit()
+	
 	valRatio = 0.0009
 	testRatio = 0.05
 	trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])

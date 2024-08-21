@@ -87,7 +87,7 @@ class GeoDataReader():
 
 
     @staticmethod
-    def ReadRasters(self, file_path=List[FilePath], allow_streaming=False, raster_transformers=[], channel_order=None, bbox=None, data_fiters=None):
+    def ReadRasters(file_path=List[FilePath], allow_streaming=False, raster_transformers=[], channel_order=None, bbox=None, data_fiters=None):
         paths = [fp.Path for fp in file_path]
         
         if data_fiters:

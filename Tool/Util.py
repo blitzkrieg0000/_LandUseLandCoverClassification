@@ -22,7 +22,7 @@ class FilePath(BaseModel):
 
 
 class DataSourceMeta(BaseModel):
-    Index: Annotated[int, "Index"]
+    Index: Annotated[int, "Index"]=None
     Scene: Annotated[str, "Scene Name"]
     DataPaths: Annotated[List[FilePath], "Bands FilePath"]
     LabelPaths: Annotated[List[FilePath], "Labels FilePath"]
