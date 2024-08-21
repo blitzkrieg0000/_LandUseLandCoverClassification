@@ -150,7 +150,19 @@ class SegmentationDatasetConfig(BaseModel):
 	@property
 	def IteratorMargin(self):
 		return max(self.BatchRepeatDataSegment)
+	
+	@property
+	def FixedPatchSize(self):
+		if isinstance(self.PatchSize, Tuple):
+			patchX, patchY = self.PatchSize[0], self.PatchSize[1]
+		else:
+			patchX, patchY = self.PatchSize, self.PatchSize
 
+		return (patchX, patchY)
+
+	@property
+	def DefaultLabelSourceConfig(self):
+		return ClassConfig(names=self.ClassNames, colors=self.ClassColors, null_class=self.NullClass)
 
 
 class CustomSubset(Dataset):
@@ -181,19 +193,21 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 	class DataReadType(Enum):
 		IndexMetaFile=0
 
+
 	def __init__(self, config: SegmentationDatasetConfig):
 		"""Segmentasyon datasetleri için bir Base classtır."""
-		self.Config = config
-		self.ExpiredScenes: Set[str]                 # Tamamen tüketilmiş scene'leri tutan set
+		self.Config = config    
 		self.GeoDatasetCache: LimitedCache           # Cache
-		self.BatchRepeatDataSegment: List[int]       # [1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]
+		self.ExpiredScenes: Set[str] = set() # Tamamen tüketilmiş scene'leri tutan set
 		self.DatasetIndexMeta: List[DataSourceMeta]
-		self.ClassConfig = ClassConfig(names=config.ClassNames, colors=config.ClassColors, null_class=config.NullClass)
 		self.GeoDatasetCache = LimitedCache(max_size_mb=1024)
-		self.ExpiredScenes = set()
+		
+		# Worker Info
 		self.StartIndex = 0
 		self.EndIndex = -1
 		self.WorkerId = None
+
+		# Auto Load Metadata
 		self.ReadMetaData()
 
 
@@ -201,9 +215,87 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 		if method == SegmentationDatasetBase.DataReadType.IndexMetaFile:
 			self.DatasetIndexMeta: List[DataSourceMeta] = GeoDataReader.ReadDatasetMetaFromIndexFile(self.Config.DatasetRootPath)
 		else:
-			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen gecerli bir yöntem tipi seçiniz: {self.DataReadType}")
+			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen geçerli bir veri okuma yöntemi tipi seçiniz: {self.DataReadType}")
 		
 		return self.DatasetIndexMeta
+
+
+	def LoadRasterSceneWithRasterMask(self, _data: DataSourceMeta) -> Scene:
+		# Read Raster
+		bands = GeoDataReader.ReadRasters(_data.DataPaths, channel_order=self.Config.ChannelOrder)
+		masks = GeoDataReader.ReadRasters(_data.LabelPaths) # TODO Label tipine göre (geoJson, shapefile) okuma yapılacak (şuan labellar birer TIF dosyası ve maske şeklinde)
+
+		# Create MultiRasterSource
+		rasterSource = MultiRasterSource(bands, primary_source_idx=GeoDataReader.FindPrimarySource(bands))
+		maskSource = MultiRasterSource(masks, primary_source_idx=GeoDataReader.FindPrimarySource(masks))
+		
+		# Create Label Source
+		ssLabelSource = SemanticSegmentationLabelSource(maskSource, class_config=self.Config.DefaultLabelSourceConfig, bbox=rasterSource.bbox)
+		
+		# Create Scene
+		scene = Scene(
+			id=f"train_scene_{_data.Scene}",
+			raster_source=rasterSource,
+			label_source=ssLabelSource
+		)
+
+		return scene
+
+
+	def CreateSlidingWindowGeoDatasetFromScene(self, scene: Scene):
+		patchX, patchY = self.Config.FixedPatchSize
+		return SemanticSegmentationSlidingWindowGeoDataset(
+			scene=scene,
+			size=(patchX, patchY),
+			stride=self.Config.StrideSize, # 112
+			padding=0                                     # TODO Parameter
+		)
+
+
+	def CreateRandomWindowGeoDatasetFromScene(self, scene: Scene):
+		patchX, patchY = self.Config.FixedPatchSize
+		return SemanticSegmentationRandomWindowGeoDataset(
+			scene=scene,
+			size_lims=(patchX, patchY+1),
+			max_windows=self.Config.MaxWindowsPerScene,
+			out_size=(patchX, patchY),
+			padding=self.Config.PaddingSize
+		)
+
+
+	def ReadSceneDataByIndexMeta(self, _data: DataSourceMeta) -> TrackableGeoIterator:
+		geoDataset = self.GeoDatasetCache.Get(_data.Scene)
+		print(f"SpectralSegmentationDataset:-> index: {_data.Index}, scene: {_data.Scene}, pid: {os.getpid()}")
+		if geoDataset is None:
+			# Read Scene
+			scene = self.LoadRasterSceneWithRasterMask(_data)
+			
+			# Convert to GeoDataset
+			if self.Config.RandomPatch:
+				geoDataset = self.CreateRandomWindowGeoDatasetFromScene(scene)
+			else:
+				geoDataset = self.CreateSlidingWindowGeoDatasetFromScene(scene) # Random vs Sliding
+
+			# Wrap GeoDataset
+			geoDataset = TrackableGeoIterator(geoDataset, _data.Index, cycle=True, margin=self.Config.IteratorMargin)
+
+			# Cache
+			self.GeoDatasetCache.Add(_data.Scene, geoDataset)       
+
+		return geoDataset
+
+
+	def GetIndexMetaById(self, idx):
+		idx %= len(self.DatasetIndexMeta)
+		_data: DataSourceMeta = self.DatasetIndexMeta[idx]
+		_data.Index = idx
+		return _data
+
+
+	def CheckGeoIteratorSceneExpiring(self, geoDataset:TrackableGeoIterator):
+		if geoDataset.IsExpired():
+			self.ExpiredScenes.add(geoDataset.Id)
+			geoDataset.Reset()
 
 
 	def SetWorkerInfo(self, worker_id, num_workers):
@@ -214,88 +306,25 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 		self.EndIndex = (self.WorkerId + 1) * self.segment_size if self.WorkerId != self.NumWorkers - 1 else len(self.__len__())
 
 
-	def GetWorkerInfo(self):
+	def GetWorkerInfo(self, verbose=False):
 		worker_info = torch.utils.data.get_worker_info()
-		if worker_info:
+		if worker_info and verbose:
 			print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id+1}/{worker_info.num_workers} workers")
+		return worker_info
 
 
-	def CheckGeoIteratorSceneExpiring(self, geoDataset:TrackableGeoIterator):
-		if geoDataset.IsExpired():
-			self.ExpiredScenes.add(geoDataset.Id)
-			geoDataset.Reset()
+	def GetNext(self, iterable, idx):
+		data = label = None
 
-
-	def GetIndexMetaById(self, idx):
-		idx %= len(self.DatasetIndexMeta)
-		_data: DataSourceMeta = self.DatasetIndexMeta[idx]
-		_data.Index = idx
-		return _data
-	
-
-	def ReadSceneDataByIndexMeta(self, _data: DataSourceMeta):
-		geoDataset = self.GeoDatasetCache.Get(_data.Scene)
-		print(f"SpectralSegmentationDataset:-> index: {_data.Index}, scene: {_data.Scene}, pid: {os.getpid()}")
-		if geoDataset is None:
-			scene = self.LoadSegmentationRasterScene(_data)
-			geoDataset = self.CreateSlidingWindowGeoDatasetFromScene(scene) # Random vs Sliding
-			geoDataset = TrackableGeoIterator(geoDataset, _data.Index, cycle=True, margin=self.Config.IteratorMargin)
-			self.GeoDatasetCache.Add(_data.Scene, geoDataset)       
-
-		return geoDataset
-
-
-	def LoadSegmentationRasterScene(self, _data: DataSourceMeta):
-		# Read Raster
-		bands = GeoDataReader.ReadRasters(_data.DataPaths, channel_order=self.Config.ChannelOrder)
-		# TODO Label tipine göre (geoJson, shapefile) okuma yapılacak (şuan labellar birer TIF dosyası ve maske şeklinde)
-		masks = GeoDataReader.ReadRasters(_data.LabelPaths)
-
-		# Create MultiRasterSource
-		rasterSource = MultiRasterSource(bands, primary_source_idx=GeoDataReader.FindPrimarySource(bands))
-		maskSource = MultiRasterSource(masks, primary_source_idx=GeoDataReader.FindPrimarySource(masks))
-		
-		# Create Label Source
-		ssLabelSource = SemanticSegmentationLabelSource(maskSource, class_config=self.ClassConfig, bbox=rasterSource.bbox)
-		
-		# Create Scene
-		scene = Scene(
-			id=f"train_scene_{_data.Scene}",
-			raster_source=rasterSource,
-			label_source=ssLabelSource
-		)
-
-		return scene
-		
-
-	def GetPatchSizeFromConfig(self):
-		if isinstance(self.Config.PatchSize, Tuple):
-			patchX, patchY = self.Config.PatchSize[0], self.Config.PatchSize[1]
+		if self.Config.RandomPatch:
+			data, label = next(iter(iterable))     # TODO: Handle => "StopIteration" Exception
 		else:
-			patchX, patchY = self.Config.PatchSize, self.Config.PatchSize
+			try:
+				data, label = iterable[idx]
+			except IndexError as e:
+				print(e)
 
-		return patchX, patchY
-
-
-	def CreateSlidingWindowGeoDatasetFromScene(self, scene: Scene):
-		patchX, patchY = self.GetPatchSizeFromConfig()
-		return SemanticSegmentationSlidingWindowGeoDataset(
-			scene=scene,
-			size=(patchX, patchY),
-			stride=self.Config.StrideSize, # 112
-			padding=0                                     # TODO Parameter
-		)
-
-
-	def CreateRandomWindowGeoDatasetFromScene(self, scene: Scene):
-		patchX, patchY = self.GetPatchSizeFromConfig()
-		return SemanticSegmentationRandomWindowGeoDataset(
-			scene=scene,
-			size_lims=(patchX, patchY+1),
-			max_windows=self.Config.MaxWindowsPerScene,
-			out_size=(patchX, patchY),
-			padding=self.Config.PaddingSize
-		)
+		return data, label
 
 
 class SegmentationBatchSamplerBase(Sampler):
@@ -435,20 +464,6 @@ class SpectralSegmentationDataset(SegmentationDatasetBase):
 
 	def __len__(self):
 		return len(self.DatasetIndexMeta)
-	
-	
-	def GetNext(self, iterable, idx):
-		data = label = None
-
-		if self.Config.RandomPatch:
-			data, label = next(iter(iterable))     # TODO: Handle => "StopIteration" Exception
-		else:
-			try:
-				data, label = iterable[idx]
-			except IndexError as e:
-				print(e)
-
-		return data, label
 
 
 	def __getitem__(self, idx):
@@ -459,7 +474,7 @@ class SpectralSegmentationDataset(SegmentationDatasetBase):
 		geoDataset = self.ReadSceneDataByIndexMeta(_meta)         
 		
 		#! GET NEXT DATA
-		data = label = self.GetNext(geoDataset, idx)
+		data, label = self.GetNext(geoDataset, idx)
 
 		# CHECK EXPIRING
 		self.CheckGeoIteratorSceneExpiring(geoDataset)
@@ -497,7 +512,6 @@ if "__main__" == __name__:
 	testRatio = 0.05
 	trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
 	print(len(trainset), len(valset), len(testset))
-
 
 	customBatchSampler = SegmentationBatchSampler(trainset)
 
