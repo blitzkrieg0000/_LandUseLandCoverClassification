@@ -22,6 +22,7 @@ class FilePath(BaseModel):
 
 
 class DataSourceMeta(BaseModel):
+    Index: Annotated[int, "Index"]
     Scene: Annotated[str, "Scene Name"]
     DataPaths: Annotated[List[FilePath], "Bands FilePath"]
     LabelPaths: Annotated[List[FilePath], "Labels FilePath"]
@@ -130,6 +131,15 @@ def ReadDatasetFromIndexFile(dataset_dir: str) -> List[DataSourceMeta]:
             datasetIndexMeta+=[DataSourceMeta(**value)]
         return datasetIndexMeta
 
+
+def SortByPatterns(self, path_list, data_filter):
+    def match_priority(path):
+        for i, pattern in enumerate(data_filter):
+            if re.search(pattern, path):
+                return i
+        return len(data_filter)
+    
+    return sorted(path_list, key=match_priority)
 
 
 if "__main__" == __name__:

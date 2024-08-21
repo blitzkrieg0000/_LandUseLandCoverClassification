@@ -30,7 +30,7 @@ from torchvision.transforms import v2 as tranformsv2
 
 from Dataset.RVDataset import (SegmentationBatchSampler, SegmentationDatasetConfig,
                                SpectralSegmentationDataset, VisualizeData,
-                               custom_collate_fn)
+                               CustomCollateFN)
 from Tool.Base import ChangeMaskOrder, GetTimeStampNow
 from Tool.DataStorage import GetIndexDatasetPath
 
@@ -170,7 +170,7 @@ TRAIN_LOADER = DataLoader(
     num_workers=2,
     persistent_workers=False, 
     pin_memory=True,
-    collate_fn=custom_collate_fn,
+    collate_fn=CustomCollateFN,
     # multiprocessing_context = torch.multiprocessing.get_context("spawn")
 )
 

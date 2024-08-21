@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from abc import ABCMeta
+from enum import Enum
 import os
-import re
 import sys
+
+from Dataset.FileReader import GeoDataReader
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
@@ -15,18 +18,18 @@ import torch
 from matplotlib import pyplot as plt
 from pydantic import BaseModel
 from rastervision.core.data import (ClassConfig, MultiRasterSource,
-                                    RasterioSource, Scene,
-                                    SemanticSegmentationLabelSource)
+									Scene,
+									SemanticSegmentationLabelSource)
+
 from rastervision.pytorch_learner import (
-    SemanticSegmentationRandomWindowGeoDataset,
-    SemanticSegmentationSlidingWindowGeoDataset,
-    SemanticSegmentationVisualizer)
-from torch.utils.data import DataLoader, Dataset, Sampler, Subset, random_split
+	SemanticSegmentationRandomWindowGeoDataset,
+	SemanticSegmentationSlidingWindowGeoDataset,
+	SemanticSegmentationVisualizer)
+from torch.utils.data import DataLoader, Dataset, Sampler, random_split
 
 from Tool.Base import LimitedCache
-from Tool.DataStorage import GetIndexDatasetPath
-from Tool.Util import (CrateDatasetIndexFile, DataSourceMeta, FilePath,
-                       ReadDatasetFromIndexFile)
+from Tool.Util import (DataSourceMeta)
+
 
 # =================================================================================================================== #
 #! CONSTS
@@ -36,473 +39,490 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 # =================================================================================================================== #
+#! FUNCTION
+# =================================================================================================================== #
+def DataChunkRepeatCounts(batch_size, batch_data_chunk_number):
+	"""[1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]"""
+	chunkSize = torch.clamp(torch.tensor(batch_data_chunk_number), 1, batch_size)
+	chunks = torch.chunk(torch.arange(batch_size), chunkSize) 
+	return list(map(len, chunks))
+
+
+def WorkerInitFN(worker_id):
+	worker_info = torch.utils.data.get_worker_info()
+	dataset = worker_info.dataset
+	dataset.set_worker_info(worker_id, worker_info.num_workers)
+
+
+def CustomCollateFN(batch):
+	data, label = zip(*batch)
+	return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
+
+
+def ShowDatasetViaVisualizer(dataset):
+	vis = SemanticSegmentationVisualizer(class_names=["background", "foreground"], class_colors=["black", "white"])
+	x, y = vis.get_batch(dataset, 4)
+	vis.plot_batch(x, y, show=True)
+
+
+def ShowRaster(raster):
+	fig, ax = plt.subplots(4, 4, figsize=(7, 7))
+	for i in range(12):
+		ax[i%4, i//4].matshow(raster[:, :, [i]], cmap="viridis")
+		ax[i%4, i//4].axis("off")
+
+	plt.show()
+
+
+def VisualizeData(dataloader, limit=None):
+	# print("\nDataloader Size:", len(DATALOADER))
+	
+	fig, axs = plt.subplots(4, 4, figsize=(12, 12))
+
+	for i, (buffer, mask) in enumerate(dataloader):
+		print(i, buffer.shape, mask.shape, "\n-----------------\n" )
+		for bn in range(buffer.shape[0]):
+			for i in range(16):
+				axs[i%4, i//4].axis("off")
+				if i<buffer.shape[1]:
+					axs[i%4, i//4].imshow(buffer[bn, i].numpy(), cmap="viridis")
+					axs[i%4, i//4].set_title(f"Band {i+1}")
+			
+			axs[3, 3].imshow(mask[bn])
+			axs[3, 3].set_title("Ground Truth")
+			plt.pause(1)
+		
+		if limit is not None and i >= limit:
+			break
+
+	plt.tight_layout()
+	plt.show()
+
+
+def VisualizePrediction(buffer, mask, predicted):
+	# print("\nDataloader Size:", len(DATALOADER))
+	
+	fig, axs = plt.subplots(4, 4, figsize=(12, 12))
+
+	for bn in range(buffer.shape[0]):
+		for i in range(16):
+			axs[i%4, i//4].axis("off")
+			if i<buffer.shape[1]:
+				image = buffer[bn, i].cpu().numpy()
+				axs[i%4, i//4].imshow(image, cmap="viridis")
+				axs[i%4, i//4].set_title(f"Band {i+1}")
+		
+		axs[2, 3].imshow(mask[bn].cpu().numpy(), cmap="viridis")
+		axs[2, 3].set_title("Ground Truth")
+		axs[3, 3].imshow(predicted[bn].cpu().numpy(), cmap="viridis")
+		axs[3, 3].text(0, 0, "Predicted", fontsize=12, color="blue", weight="bold")
+
+	plt.tight_layout()
+	plt.show()
+
+
+
+# =================================================================================================================== #
 #! CLASS
 # =================================================================================================================== #
 class SegmentationDatasetConfig(BaseModel):
-    ClassNames: Annotated[List[str], "Class Names"]
-    ClassColors: Annotated[List[str| tuple], "Class Colors"]
-    NullClass: Annotated[str, "Null Class"] = None
-    MaxWindowsPerScene: Annotated[int | float | None, "Max Windows Per Scene"]
-    DatasetRootPath: Annotated[str, "Dataset Index File"]
-    PatchSize: Annotated[Tuple[int, int] | int, "Patch Size"]
-    PaddingSize: Annotated[int, "Padding Size"]
-    Shuffle: Annotated[bool, "Shuffle"]  
-    Epoch: Annotated[int, "Epoch"] = None
-    RandomPatch: Annotated[bool, "Random Patch"] = True
-    BatchDataChunkNumber: Annotated[int, "Batch Dataset Chunk Number"]
-    BatchSize: Annotated[int, "Batch Size"]
-    DropLastBatch: Annotated[bool, "Drop Last Batch"] = True
-    StrideSize: Annotated[int, "Sliding Window Stride Size"] = 112
-    ChannelOrder: Annotated[List[int], "Channel Order"] = None
-    DataFilter: Annotated[List[str], "Data Filter"] = None
-    
-
-class SegmentationDatasetBase(Dataset):
-    def __init__(self, config: SegmentationDatasetConfig):
-        """Segmentasyon datasetleri için bir Base classtır."""
-        self.Config = config
-        self.ExpiredScenes: Set[str]                 # Tamamen tüketilmiş scene'leri tutan set
-        self.GeoDatasetCache: LimitedCache           # Cache
-        self.BatchRepeatDataSegment: List[int]        # [1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]
-
-
-class SegmentationBatchSamplerMeta(type):
-    def __init__(cls, name, bases, attrs):
-        super().__init__(name, bases, attrs)
-        cls.BatchRepeatDataSegment = None
+	ClassNames: Annotated[List[str], "Class Names"]
+	ClassColors: Annotated[List[str| tuple], "Class Colors"]
+	NullClass: Annotated[str, "Null Class"] = None
+	MaxWindowsPerScene: Annotated[int | float | None, "Max Windows Per Scene"]
+	DatasetRootPath: Annotated[str, "Dataset Index File"]
+	PatchSize: Annotated[Tuple[int, int] | int, "Patch Size"]
+	PaddingSize: Annotated[int, "Padding Size"]
+	Shuffle: Annotated[bool, "Shuffle"]  
+	Epoch: Annotated[int, "Epoch"] = None
+	RandomPatch: Annotated[bool, "Random Patch"] = True
+	BatchDataChunkNumber: Annotated[int, "Batch Dataset Chunk Number"] = 1
+	BatchSize: Annotated[int, "Batch Size"] = 1
+	DropLastBatch: Annotated[bool, "Drop Last Batch"] = True
+	StrideSize: Annotated[int, "Sliding Window Stride Size"] = 112
+	ChannelOrder: Annotated[List[int], "Channel Order"] = None
+	DataFilter: Annotated[List[str], "Data Filter By File Name Regex"] = None
+	
+	@property
+	def BatchRepeatDataSegment(self):
+		return DataChunkRepeatCounts(self.BatchSize, self.BatchDataChunkNumber)
+	
+	@property
+	def IteratorMargin(self):
+		return max(self.BatchRepeatDataSegment)
 
 
 
-class SegmentationBatchSamplerBase(Sampler, metaclass=SegmentationBatchSamplerMeta):
-    def __init__(self, data_source: SegmentationDatasetBase):
-        self.Config: SegmentationDatasetConfig = data_source.Config
-        self.DataSource = data_source
-        self.Indices = list(range(len(self.DataSource)))
-        data_source.BatchRepeatDataSegment = __class__.DataChunkRepeatCounts(self.Config.BatchSize, self.Config.BatchDataChunkNumber)
-        self.Index = -1
-        self.EpochCounter = 0
+class CustomSubset(Dataset):
+	def __init__(self, dataset: Dataset, split_rates: List[float]=[0.0009, 0.05]) -> None:
+		self.Dataset = dataset
+		self.indices = []
+		self.SplitRates = split_rates
+
+	
+	def CreateSubsets(self):
+		self.DataSubsets = random_split(self.Dataset, self.SplitRates)
+		self.indices = self.DataSubsets[0].indices
 
 
-    @staticmethod
-    def DataChunkRepeatCounts(batch_size, batch_data_chunk_number):
-        """[1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]"""
-        chunkSize = torch.clamp(torch.tensor(batch_data_chunk_number), 1, batch_size)
-        chunks = torch.chunk(torch.arange(batch_size), chunkSize) 
-        __class__.BatchRepeatDataSegment = list(map(len, chunks))
-        return __class__.BatchRepeatDataSegment
-        
+	def __getitem__(self, idx):
+		if isinstance(idx, list):
+			return self.Dataset[[self.indices[i] for i in idx]]
+		return self.Dataset[self.indices[idx]]
+	
 
-    def __len__(self):
-        return self.Config.Epoch if self.Config.RandomPatch else len(self.DataSource)
+	def __len__(self):
+		return len(self.indices)
 
 
-    def __iter__(self):
-        if self.Config.Shuffle:
-            random.shuffle(self.Indices)
-        return self
+
+class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
+
+	class DataReadType(Enum):
+		IndexMetaFile=0
+
+	def __init__(self, config: SegmentationDatasetConfig):
+		"""Segmentasyon datasetleri için bir Base classtır."""
+		self.Config = config
+		self.ExpiredScenes: Set[str]                 # Tamamen tüketilmiş scene'leri tutan set
+		self.GeoDatasetCache: LimitedCache           # Cache
+		self.BatchRepeatDataSegment: List[int]       # [1 1 1 1 1 1 1 1], [2 2 2 2], [4 4], [3 3 2], [8]
+		self.DatasetIndexMeta: List[DataSourceMeta]
+		self.ClassConfig = ClassConfig(names=config.ClassNames, colors=config.ClassColors, null_class=config.NullClass)
+		self.GeoDatasetCache = LimitedCache(max_size_mb=1024)
+		self.ExpiredScenes = set()
+		self.StartIndex = 0
+		self.EndIndex = -1
+		self.WorkerId = None
+		self.ReadMetaData()
 
 
-    def __next__(self):
-        self.Index+=1
-        self.CheckStoppingConditions()
-        indexes = self.PrepareBatchIndexes()
-        return indexes
+	def ReadMetaData(self, method=DataReadType.IndexMetaFile) -> DataSourceMeta:
+		if method == SegmentationDatasetBase.DataReadType.IndexMetaFile:
+			self.DatasetIndexMeta: List[DataSourceMeta] = GeoDataReader.ReadDatasetMetaFromIndexFile(self.Config.DatasetRootPath)
+		else:
+			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen gecerli bir yöntem tipi seçiniz: {self.DataReadType}")
+		
+		return self.DatasetIndexMeta
 
 
-    def CheckStoppingConditions(self):
-        if self.Config.RandomPatch and self.Index >= self.__len__():      # Sadece Random Patch ise belirli bir epoch sayısı kadar batchler için index üretir.
-            print("Random Patch Done")
-            raise StopIteration
-        
-        # [1 1 1 1 2 2 2 2]
-        elif len(self.DataSource.ExpiredScenes)>=len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
-            self.DataSource.ExpiredScenes.clear()
-            self.EpochCounter += 1
-
-            if self.EpochCounter >= self.Config.Epoch:
-                # self.EpochCounter = 0
-                raise StopIteration
+	def SetWorkerInfo(self, worker_id, num_workers):
+		self.WorkerId = worker_id
+		self.NumWorkers = num_workers
+		self.segment_size = len(self.DatasetIndexMeta) // self.NumWorkers
+		self.StartIndex = self.WorkerId * self.segment_size
+		self.EndIndex = (self.WorkerId + 1) * self.segment_size if self.WorkerId != self.NumWorkers - 1 else len(self.__len__())
 
 
-    def PrepareBatchIndexes(self):
-        # Random Patch
-        new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes)
-    
-        choices = np.random.choice(
-            new_indices,
-            size=len(self.__class__.BatchRepeatDataSegment), # Hangi değişken
-            replace=len(new_indices) < len(SegmentationBatchSampler.BatchRepeatDataSegment)
-        )          
-        return np.repeat(choices, SegmentationBatchSampler.BatchRepeatDataSegment)
+	def GetWorkerInfo(self):
+		worker_info = torch.utils.data.get_worker_info()
+		if worker_info:
+			print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id+1}/{worker_info.num_workers} workers")
+
+
+	def CheckGeoIteratorSceneExpiring(self, geoDataset:TrackableGeoIterator):
+		if geoDataset.IsExpired():
+			self.ExpiredScenes.add(geoDataset.Id)
+			geoDataset.Reset()
+
+
+	def GetIndexMetaById(self, idx):
+		idx %= len(self.DatasetIndexMeta)
+		_data: DataSourceMeta = self.DatasetIndexMeta[idx]
+		_data.Index = idx
+		return _data
+	
+
+	def ReadSceneDataByIndexMeta(self, _data: DataSourceMeta):
+		geoDataset = self.GeoDatasetCache.Get(_data.Scene)
+		print(f"SpectralSegmentationDataset:-> index: {_data.Index}, scene: {_data.Scene}, pid: {os.getpid()}")
+		if geoDataset is None:
+			scene = self.LoadSegmentationRasterScene(_data)
+			geoDataset = self.CreateSlidingWindowGeoDatasetFromScene(scene) # Random vs Sliding
+			geoDataset = TrackableGeoIterator(geoDataset, _data.Index, cycle=True, margin=self.Config.IteratorMargin)
+			self.GeoDatasetCache.Add(_data.Scene, geoDataset)       
+
+		return geoDataset
+
+
+	def LoadSegmentationRasterScene(self, _data: DataSourceMeta):
+		# Read Raster
+		bands = GeoDataReader.ReadRasters(_data.DataPaths, channel_order=self.Config.ChannelOrder)
+		# TODO Label tipine göre (geoJson, shapefile) okuma yapılacak (şuan labellar birer TIF dosyası ve maske şeklinde)
+		masks = GeoDataReader.ReadRasters(_data.LabelPaths)
+
+		# Create MultiRasterSource
+		rasterSource = MultiRasterSource(bands, primary_source_idx=GeoDataReader.FindPrimarySource(bands))
+		maskSource = MultiRasterSource(masks, primary_source_idx=GeoDataReader.FindPrimarySource(masks))
+		
+		# Create Label Source
+		ssLabelSource = SemanticSegmentationLabelSource(maskSource, class_config=self.ClassConfig, bbox=rasterSource.bbox)
+		
+		# Create Scene
+		scene = Scene(
+			id=f"train_scene_{_data.Scene}",
+			raster_source=rasterSource,
+			label_source=ssLabelSource
+		)
+
+		return scene
+		
+
+	def GetPatchSizeFromConfig(self):
+		if isinstance(self.Config.PatchSize, Tuple):
+			patchX, patchY = self.Config.PatchSize[0], self.Config.PatchSize[1]
+		else:
+			patchX, patchY = self.Config.PatchSize, self.Config.PatchSize
+
+		return patchX, patchY
+
+
+	def CreateSlidingWindowGeoDatasetFromScene(self, scene: Scene):
+		patchX, patchY = self.GetPatchSizeFromConfig()
+		return SemanticSegmentationSlidingWindowGeoDataset(
+			scene=scene,
+			size=(patchX, patchY),
+			stride=self.Config.StrideSize, # 112
+			padding=0                                     # TODO Parameter
+		)
+
+
+	def CreateRandomWindowGeoDatasetFromScene(self, scene: Scene):
+		patchX, patchY = self.GetPatchSizeFromConfig()
+		return SemanticSegmentationRandomWindowGeoDataset(
+			scene=scene,
+			size_lims=(patchX, patchY+1),
+			max_windows=self.Config.MaxWindowsPerScene,
+			out_size=(patchX, patchY),
+			padding=self.Config.PaddingSize
+		)
+
+
+class SegmentationBatchSamplerBase(Sampler):
+	def __init__(self, data_source: SegmentationDatasetBase):
+		self.Config: SegmentationDatasetConfig = data_source.Config
+		self.DataSource = data_source
+		self.Indices = list(range(len(self.DataSource)))
+		self.Index = -1
+		self.EpochCounter = 0
+
+
+	def __len__(self):
+		return self.Config.Epoch if self.Config.RandomPatch else len(self.DataSource)
+
+
+	def __iter__(self):
+		if self.Config.Shuffle:
+			random.shuffle(self.Indices)
+		return self
+
+
+	def __next__(self):
+		self.Index+=1
+		self.CheckStoppingConditions()
+		indexes = self.PrepareBatchIndexes()
+		return indexes
+
+
+	def CheckStoppingConditions(self):
+		if self.Config.RandomPatch and self.Index >= self.__len__():      # Sadece Random Patch ise belirli bir epoch sayısı kadar batchler için index üretir.
+			print("Random Patch Done")
+			raise StopIteration
+		
+		# [1 1 1 1 2 2 2 2]
+		elif len(self.DataSource.ExpiredScenes) >= len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
+			self.DataSource.ExpiredScenes.clear()
+			self.EpochCounter += 1
+
+			if self.EpochCounter >= self.Config.Epoch:
+				# self.EpochCounter = 0
+				raise StopIteration
+
+
+	def PrepareBatchIndexes(self):
+		# Random Patch
+		new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes)
+	
+		choices = np.random.choice(
+			new_indices,
+			size=len(self.Config.BatchRepeatDataSegment), # Hangi değişken
+			replace=len(new_indices) < len(self.Config.BatchRepeatDataSegment)
+		)          
+		return np.repeat(choices, self.Config.BatchRepeatDataSegment)
 
 
 
 class SegmentationBatchSampler(SegmentationBatchSamplerBase):
-    def __init__(self, data_source: SegmentationDatasetBase):
-        super().__init__(data_source)
-    
+	def __init__(self, data_source: SegmentationDatasetBase):
+		super().__init__(data_source)
+	
 
-    def __iter__(self):
-        return super().__iter__()
+	def __iter__(self):
+		return super().__iter__()
 
 
-    def __next__(self):
-        indexes = super().__next__()
-        return indexes
+	def __next__(self):
+		indexes = super().__next__()
+		return indexes
 
 
 
 class TrackableGeoIterator():
-    """GeoSlider veya Random GeoIterator için indis takibi yapan bir sınıftır."""
-    def __init__(self, iterator, id, cycle=False, margin=None):
-        self.Id = id
-        self.Index = -1
-        self._Expired = False
-        self._Cycle = cycle
-        self.Iterator = iterator
-        self.margin = margin
+	"""GeoSlider veya Random GeoIterator için indis takibi yapan bir sınıftır."""
+	def __init__(self, iterator, id, cycle=False, margin=None):
+		self.Id = id
+		self.Index = -1
+		self._Expired = False
+		self._Cycle = cycle
+		self.Iterator = iterator
+		self.margin = margin
 
 
-    def __iter__(self):
-        return self
-    
+	def __iter__(self):
+		return self
+	
 
-    def __next__(self):
-        """For Random GeoDataset"""
-        return next(iter(self.Iterator))
-
-
-    def __len__(self):
-        return len(self.Iterator) 
-    
-
-    def __getitem__(self, id):
-        """For Sliding GeoDataset"""
-        self.Index += 1
-        self.CheckIndex()
-        # print(f"Trackable Iterator:-> Patch Index: {self.Index}-%-{self.Index % len(self.Iterator)}")
-        return self.Iterator[self.Index % self.__len__()]
+	def __next__(self):
+		"""For Random GeoDataset"""
+		return next(iter(self.Iterator))
 
 
-    @property
-    def Margin(self):
-        if 0 != self.__len__() % self.margin:
-            return self.margin - (self.__len__() % self.margin)
-        else:
-            return 0
+	def __len__(self):
+		return len(self.Iterator) 
+	
+
+	def __getitem__(self, id):
+		"""For Sliding GeoDataset"""
+		self.Index += 1
+		self.CheckIndex()
+		# print(f"Trackable Iterator:-> Patch Index: {self.Index}-%-{self.Index % len(self.Iterator)}")
+		return self.Iterator[self.Index % self.__len__()]
 
 
-    def CheckIndex(self):
-        if (self._Expired and not self._Cycle):
-            raise IndexError
-        
-        self._Expired = self.Index >= self.__len__() + self.Margin - 1    # TODO Eğer alınamayacak kadar window varsa drop_last uygula veya 1 kerelik cycle yap
+	@property
+	def Margin(self):
+		if 0 != self.__len__() % self.margin:
+			return self.margin - (self.__len__() % self.margin)
+		else:
+			return 0
 
 
-    def GetIndex(self):
-        return self.Index
+	def CheckIndex(self):
+		if (self._Expired and not self._Cycle):
+			raise IndexError
+		
+		self._Expired = self.Index >= self.__len__() + self.Margin - 1    # TODO Eğer alınamayacak kadar window varsa drop_last uygula veya 1 kerelik cycle yap
+
+
+	def GetIndex(self):
+		return self.Index
+
+
+	def IsExpired(self):
+		return self._Expired
+
+
+	def Reset(self):
+		self.Index = -1
+		self._Expired = False
 
 
 
 class SpectralSegmentationDataset(SegmentationDatasetBase):
-    def __init__(self, config: SegmentationDatasetConfig):
-        super().__init__(config)
-        self.ClassConfig = ClassConfig(names=config.ClassNames, colors=config.ClassColors, null_class=config.NullClass)
-        self.MaxWindowsPerScene = config.MaxWindowsPerScene
-        self.StrideSize = config.StrideSize
-        self.PatchSize = config.PatchSize
-        self.PaddingSize = config.PaddingSize
-        self.Shuffle = config.Shuffle
-        self.RandomPatch = config.RandomPatch
-        self.GeoDatasetCache = LimitedCache(max_size_mb=1024)
-        self.DatasetIndexMeta: List[DataSourceMeta] = ReadDatasetFromIndexFile(config.DatasetRootPath)
-        # self.DatasetIndexMeta = self.DatasetIndexMeta[:3]
-        self.ExpiredScenes = set()
-        self.start_idx = 0
-        self.end_idx = -1
-        self.IteratorMargin = max(self.BatchRepeatDataSegment)
+	def __init__(self, config: SegmentationDatasetConfig):
+		super().__init__(config)
 
 
-    def __len__(self):
-        return len(self.DatasetIndexMeta)
-    
+	def __len__(self):
+		return len(self.DatasetIndexMeta)
+	
+	
+	def GetNext(self, iterable, idx):
+		data = label = None
 
-    def __getitem__(self, idx):
-        worker_info = torch.utils.data.get_worker_info()
-        if worker_info:
-            print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id+1}/{worker_info.num_workers} workers")
+		if self.Config.RandomPatch:
+			data, label = next(iter(iterable))     # TODO: Handle => "StopIteration" Exception
+		else:
+			try:
+				data, label = iterable[idx]
+			except IndexError as e:
+				print(e)
 
-        # READ SOURCE META
-        idx %= len(self.DatasetIndexMeta)
-        _data: DataSourceMeta = self.DatasetIndexMeta[idx]
-
-        # READ SCENE AND CACHE
-        geoDataset = self.GeoDatasetCache.Get(_data.Scene)            # TODO State'i tut.
-        print(f"SpectralSegmentationDataset:-> index: {idx}, scene: {_data.Scene}, pid: {os.getpid()}")
-        if geoDataset is None:
-            geoDataset = self.LoadData(_data)
-            geoDataset = TrackableGeoIterator(geoDataset, idx, cycle=True, margin=self.IteratorMargin)
-            self.GeoDatasetCache.Add(_data.Scene, geoDataset)              
-        
-        #! Get Next
-        data = label = None
-        if self.RandomPatch:
-            data, label = next(iter(geoDataset))     # TODO: Handle => "StopIteration" Exception
-        else:
-            try:
-                data, label = geoDataset[idx]
-            except IndexError as e:
-                print(e)
-            self.CheckExpiring(geoDataset)
-        
-        print("---")
-
-        return data, label
+		return data, label
 
 
-    def set_worker_info(self, worker_id, num_workers):
-        self.worker_id = worker_id
-        self.num_workers = num_workers
-        self.segment_size = len(self.DatasetIndexMeta) // self.num_workers
-        self.start_idx = self.worker_id * self.segment_size
-        self.end_idx = (self.worker_id + 1) * self.segment_size if self.worker_id != self.num_workers - 1 else len(self.data)
+	def __getitem__(self, idx):
+		# READ SOURCE META
+		_meta = self.GetIndexMetaById(idx)
 
+		# READ SCENE AND CACHE
+		geoDataset = self.ReadSceneDataByIndexMeta(_meta)         
+		
+		#! GET NEXT DATA
+		data = label = self.GetNext(geoDataset, idx)
 
-    def CheckExpiring(self, geoDataset:TrackableGeoIterator):
-        if geoDataset._Expired:
-            self.ExpiredScenes.add(geoDataset.Id)
-            # Reset Index
-            geoDataset.Index = -1
-            geoDataset._Expired = False
+		# CHECK EXPIRING
+		self.CheckGeoIteratorSceneExpiring(geoDataset)
 
-        # if len(self.ExpiredScenes)==self.__len__():
-        #     self.ExpiredScenes.clear()
-        #     raise StopIteration
-        # TODO Indexable Verilerin indexlerini de sıfırla
+		return data, label
 
-
-    def FindPrimarySource(self, bands: List[DataSourceMeta]):
-        """
-            MultiRasterSource'un birden fazla bandı stack'lerken kullanacağı referans band'ın index numarasını arar.
-            En büyük shape'e sahip bandın index numarasını döndürür.
-        """
-        reference_band_index=0
-        band_size=0
-        for band_index, band in enumerate(bands):
-            size = reduce(lambda x, y: x * y, band.shape[:-1])
-            if size >= band_size:
-                band_size = size
-                reference_band_index = band_index
-
-        return reference_band_index
-
-
-    def SortByPatterns(self, path_list, data_filter):
-        def match_priority(path):
-            for i, pattern in enumerate(data_filter):
-                if re.search(pattern, path):
-                    return i
-            return len(data_filter)
-        
-        return sorted(path_list, key=match_priority)
-
-
-    def ReadRaster(self, file_path=List[FilePath], allow_streaming=False, raster_transformers=[], channel_order=None, bbox=None):
-        paths = [fp.Path for fp in file_path]
-        
-        if self.Config.DataFilter:
-            paths = self.SortByPatterns(paths, self.Config.DataFilter)
-        
-        rasters = []
-        for path in paths:
-            raster = RasterioSource(
-                        path,
-                        allow_streaming=allow_streaming,
-                        raster_transformers=raster_transformers,
-                        channel_order=channel_order,
-                        bbox=bbox
-                    )
-            
-            rasters+=[raster]
-        return rasters
-
-
-    def LoadData(self, _data: DataSourceMeta):
-        # Read Raster
-        bands = self.ReadRaster(_data.DataPaths, channel_order=self.Config.ChannelOrder)
-        # TODO Label tipine göre (geoJson, shapefile) okuma yapılacak (şuan labellar birer TIF dosyası ve maske şeklinde)
-        masks = self.ReadRaster(_data.LabelPaths)
-
-        # Create MultiRasterSource
-        rasterSource = MultiRasterSource(bands, primary_source_idx=self.FindPrimarySource(bands))
-        maskSource = MultiRasterSource(masks, primary_source_idx=self.FindPrimarySource(masks))
-        
-        # Create Label Source
-        ssLabelSource = SemanticSegmentationLabelSource(maskSource, class_config=self.ClassConfig, bbox=rasterSource.bbox)
-        
-        # Create Scene
-        scene = Scene(
-            id=f"train_scene_{_data.Scene}",
-            raster_source=rasterSource,
-            label_source=ssLabelSource
-        )
-
-        # Patch
-        if isinstance(self.PatchSize, Tuple):
-            patchX, patchY = self.PatchSize[0], self.PatchSize[1]
-        else:
-            patchX, patchY = self.PatchSize, self.PatchSize
-        
-        if self.RandomPatch:
-            #! 1-RANDOM
-            return SemanticSegmentationRandomWindowGeoDataset(
-                scene = scene,
-                size_lims = (patchX, patchY+1),
-                max_windows = self.MaxWindowsPerScene,
-                out_size = (patchX, patchY),
-                padding = self.PaddingSize
-            )
-        else:
-            #! 2-SEQUENCE
-            return SemanticSegmentationSlidingWindowGeoDataset(
-                    scene = scene,
-                    size = (patchX, patchY),
-                    stride = self.StrideSize, # 112
-                    padding = 0                                     # TODO Parameter
-                )
-
-
-def worker_init_fn(worker_id):
-    worker_info = torch.utils.data.get_worker_info()
-    dataset = worker_info.dataset
-    dataset.set_worker_info(worker_id, worker_info.num_workers)
-
-
-def custom_collate_fn(batch):
-    data, label = zip(*batch)
-    return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
-
-
-def ShowDatasetViaVisualizer(dataset):
-    vis = SemanticSegmentationVisualizer(class_names=["background", "foreground"], class_colors=["black", "white"])
-    x, y = vis.get_batch(dataset, 4)
-    vis.plot_batch(x, y, show=True)
-
-
-def ShowRaster(raster):
-    fig, ax = plt.subplots(4, 4, figsize=(7, 7))
-    for i in range(12):
-        ax[i%4, i//4].matshow(raster[:, :, [i]], cmap="viridis")
-        ax[i%4, i//4].axis("off")
-
-    plt.show()
-
-
-def VisualizeData(dataloader, limit=None):
-    # print("\nDataloader Size:", len(DATALOADER))
-    
-    fig, axs = plt.subplots(4, 4, figsize=(12, 12))
-
-    for i, (buffer, mask) in enumerate(dataloader):
-        print(i, buffer.shape, mask.shape, "\n-----------------\n" )
-        for bn in range(buffer.shape[0]):
-            for i in range(16):
-                axs[i%4, i//4].axis("off")
-                if i<buffer.shape[1]:
-                    axs[i%4, i//4].imshow(buffer[bn, i].numpy(), cmap="viridis")
-                    axs[i%4, i//4].set_title(f"Band {i+1}")
-            
-            axs[3, 3].imshow(mask[bn])
-            axs[3, 3].set_title("Ground Truth")
-            plt.pause(1)
-        
-        if limit is not None and i >= limit:
-            break
-
-    plt.tight_layout()
-    plt.show()
-
-
-def VisualizePrediction(buffer, mask, predicted):
-    # print("\nDataloader Size:", len(DATALOADER))
-    
-    fig, axs = plt.subplots(4, 4, figsize=(12, 12))
-
-    for bn in range(buffer.shape[0]):
-        for i in range(16):
-            axs[i%4, i//4].axis("off")
-            if i<buffer.shape[1]:
-                image = buffer[bn, i].cpu().numpy()
-                axs[i%4, i//4].imshow(image, cmap="viridis")
-                axs[i%4, i//4].set_title(f"Band {i+1}")
-        
-        axs[2, 3].imshow(mask[bn].cpu().numpy(), cmap="viridis")
-        axs[2, 3].set_title("Ground Truth")
-        axs[3, 3].imshow(predicted[bn].cpu().numpy(), cmap="viridis")
-        axs[3, 3].text(0, 0, "Predicted", fontsize=12, color="blue", weight="bold")
-
-    plt.tight_layout()
-    plt.show()
 
 
 
 if "__main__" == __name__:
-    # os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
-    # DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
+	# os.environ["DATA_INDEX_FILE"] ="data/dataset/.index"
+	# DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
 
-    DATASET_PATH = "data/dataset/SeasoNet/"
-    dsConfig = SegmentationDatasetConfig(
-        ClassNames=["background", "excavation_area"],
-        ClassColors=["lightgray", "darkred"],
-        NullClass="background",
-        MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-        PatchSize=(120, 120),
-        PaddingSize=0,
-        Shuffle=True,
-        Epoch=5,
-        DatasetRootPath=DATASET_PATH,
-        RandomPatch=False,
-        BatchDataChunkNumber=16,
-        BatchSize=16,
-        DropLastBatch=True,
-        # ChannelOrder=[1,2,3,7],
-        DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"]
-    )
+	DATASET_PATH = "data/dataset/SeasoNet/"
+	dsConfig = SegmentationDatasetConfig(
+		ClassNames=["background", "excavation_area"],
+		ClassColors=["lightgray", "darkred"],
+		NullClass="background",
+		MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+		PatchSize=(120, 120),
+		PaddingSize=0,
+		Shuffle=True,
+		Epoch=5,
+		DatasetRootPath=DATASET_PATH,
+		RandomPatch=False,
+		BatchDataChunkNumber=16,
+		BatchSize=16,
+		DropLastBatch=True,
+		# ChannelOrder=[1,2,3,7],
+		DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"]
+	)
 
-    dataset = SpectralSegmentationDataset(dsConfig)
-    valRatio = 0.0009
-    testRatio = 0.05
-    trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
-    print(len(trainset), len(valset), len(testset))
-
-
-    customBatchSampler = SegmentationBatchSampler(trainset, config=dsConfig)
-
-    TRAIN_LOADER = DataLoader(
-        trainset,
-        batch_sampler=customBatchSampler,
-        num_workers=2,
-        persistent_workers=False, 
-        pin_memory=True,
-        collate_fn=custom_collate_fn,
-        # multiprocessing_context = torch.multiprocessing.get_context("spawn")
-    )
-    
-    VAL_LOADER = DataLoader(valset, batch_size=1)
+	dataset = SpectralSegmentationDataset(dsConfig)
+	valRatio = 0.0009
+	testRatio = 0.05
+	trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
+	print(len(trainset), len(valset), len(testset))
 
 
-    print("Main Process Id:", os.getpid())
-    # for i, (inputs, targets) in enumerate(TRAIN_LOADER):
-    #     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-    #     print("\n", "-"*10)
-    #     print(f"Batch: {i}", inputs.shape, targets.shape)
-    #     print("-"*10, "\n")
-    #     print(f"Batch: {i}")
+	customBatchSampler = SegmentationBatchSampler(trainset)
 
-    #! VisualizeData
-    VisualizeData(VAL_LOADER)
-    
-    
+	TRAIN_LOADER = DataLoader(
+		trainset,
+		batch_sampler=customBatchSampler,
+		num_workers=2,
+		persistent_workers=False, 
+		pin_memory=True,
+		collate_fn=CustomCollateFN,
+		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
+	)
+	
+	VAL_LOADER = DataLoader(valset, batch_size=1)
 
 
+	print("Main Process Id:", os.getpid())
+	# for i, (inputs, targets) in enumerate(TRAIN_LOADER):
+	#     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+	#     print("\n", "-"*10)
+	#     print(f"Batch: {i}", inputs.shape, targets.shape)
+	#     print("-"*10, "\n")
+	#     print(f"Batch: {i}")
 
+	#! VisualizeData
+	VisualizeData(VAL_LOADER)
+	
+	

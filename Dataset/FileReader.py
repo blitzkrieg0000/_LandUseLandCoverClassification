@@ -1,9 +1,18 @@
+from functools import reduce
+import json
+import os
 import random
+from typing import List
 
 import numpy as np
 import rasterio
 import rasterio.windows
 import torch
+
+from Tool.Util import DataSourceMeta, FilePath, SortByPatterns
+from rastervision.core.data import (ClassConfig, MultiRasterSource,
+                                    RasterioSource, Scene,
+                                    SemanticSegmentationLabelSource)
 
 
 class GeoTIFFReader():
@@ -63,3 +72,52 @@ class GeoTIFFReader():
 
         return torch.tensor(buffer, dtype=torch.float32), window
 
+
+
+class GeoDataReader():
+    @staticmethod
+    def ReadDatasetMetaFromIndexFile(dataset_dir: str) -> List[DataSourceMeta]:
+        file_path = os.path.join(dataset_dir, "index.json")
+        with open(file_path, "r") as file:
+            jsonData:dict = json.load(file)
+            datasetIndexMeta = []
+            for key, value in jsonData["data"].items():
+                datasetIndexMeta+=[DataSourceMeta(**value)]
+            return datasetIndexMeta
+
+
+    @staticmethod
+    def ReadRasters(self, file_path=List[FilePath], allow_streaming=False, raster_transformers=[], channel_order=None, bbox=None, data_fiters=None):
+        paths = [fp.Path for fp in file_path]
+        
+        if data_fiters:
+            paths = SortByPatterns(paths, data_fiters)
+        
+        rasters = []
+        for path in paths:
+            raster = RasterioSource(
+                        path,
+                        allow_streaming=allow_streaming,
+                        raster_transformers=raster_transformers,
+                        channel_order=channel_order,
+                        bbox=bbox
+                    )
+            
+            rasters+=[raster]
+        return rasters
+    
+    @staticmethod
+    def FindPrimarySource(bands: List[DataSourceMeta]):
+        """
+			MultiRasterSource'un birden fazla bandı stack'lerken kullanacağı referans band'ın index numarasını arar.
+			En büyük shape'e sahip bandın index numarasını döndürür.
+		"""
+        reference_band_index=0
+        band_size=0
+        for band_index, band in enumerate(bands):
+            size = reduce(lambda x, y: x * y, band.shape[:-1])
+            if size >= band_size:
+                band_size = size
+                reference_band_index = band_index
+
+        return reference_band_index
