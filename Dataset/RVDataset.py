@@ -134,7 +134,7 @@ class SegmentationDatasetConfig(BaseModel):
 	PatchSize: Annotated[Tuple[int, int] | int, "Patch Size"]
 	PaddingSize: Annotated[int, "Padding Size"]
 	Shuffle: Annotated[bool, "Shuffle"]  
-	Epoch: Annotated[int, "Epoch"] = None
+	RandomLimit: Annotated[int, "RandomLimit"] = None
 	RandomPatch: Annotated[bool, "Random Patch"] = True
 	BatchDataChunkNumber: Annotated[int, "Batch Dataset Chunk Number"] = 1
 	BatchSize: Annotated[int, "Batch Size"] = 1
@@ -209,6 +209,26 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 
 		# Auto Load Metadata
 		self.ReadMetaData()
+
+
+	def __len__(self):
+		return len(self.DatasetIndexMeta)
+
+
+	def __getitem__(self, idx):
+		# READ SOURCE META
+		_meta = self.GetIndexMetaById(idx)
+
+		# READ SCENE AND CACHE
+		geoDataset = self.ReadSceneDataByIndexMeta(_meta)         
+		
+		#! GET NEXT DATA
+		data, label = self.GetNext(geoDataset, idx)
+
+		# CHECK EXPIRING STATUS
+		self.CheckGeoIteratorSceneExpiring(geoDataset)
+
+		return data, label
 
 
 	def ReadMetaData(self, method=DataReadType.IndexMetaFile) -> DataSourceMeta:
@@ -327,17 +347,18 @@ class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 		return data, label
 
 
+
 class SegmentationBatchSamplerBase(Sampler):
 	def __init__(self, data_source: SegmentationDatasetBase):
 		self.Config: SegmentationDatasetConfig = data_source.Config
 		self.DataSource = data_source
 		self.Indices = list(range(len(self.DataSource)))
 		self.Index = -1
-		self.EpochCounter = 0
+		self.RandomLimitCounterCounter = 0
 
 
 	def __len__(self):
-		return self.Config.Epoch if self.Config.RandomPatch else len(self.DataSource)
+		return self.Config.RandomLimit if self.Config.RandomPatch else len(self.DataSource)
 
 
 	def __iter__(self):
@@ -361,10 +382,10 @@ class SegmentationBatchSamplerBase(Sampler):
 		# [1 1 1 1 2 2 2 2]
 		elif len(self.DataSource.ExpiredScenes) >= len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
 			self.DataSource.ExpiredScenes.clear()
-			self.EpochCounter += 1
+			self.RandomLimitCounter += 1
 
-			if self.EpochCounter >= self.Config.Epoch:
-				# self.EpochCounter = 0
+			if self.RandomLimitCounter >= self.Config.RandomLimit:
+				# self.RandomLimitCounter = 0
 				raise StopIteration
 
 
@@ -462,23 +483,8 @@ class SpectralSegmentationDataset(SegmentationDatasetBase):
 		super().__init__(config)
 
 
-	def __len__(self):
-		return len(self.DatasetIndexMeta)
-
-
 	def __getitem__(self, idx):
-		# READ SOURCE META
-		_meta = self.GetIndexMetaById(idx)
-
-		# READ SCENE AND CACHE
-		geoDataset = self.ReadSceneDataByIndexMeta(_meta)         
-		
-		#! GET NEXT DATA
-		data, label = self.GetNext(geoDataset, idx)
-
-		# CHECK EXPIRING
-		self.CheckGeoIteratorSceneExpiring(geoDataset)
-
+		data, label = super().__getitem__(idx)
 		return data, label
 
 
@@ -497,7 +503,7 @@ if "__main__" == __name__:
 		PatchSize=(120, 120),
 		PaddingSize=0,
 		Shuffle=True,
-		Epoch=5,
+		RandomLimit=1,
 		DatasetRootPath=DATASET_PATH,
 		RandomPatch=False,
 		BatchDataChunkNumber=16,
