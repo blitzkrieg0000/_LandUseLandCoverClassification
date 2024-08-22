@@ -30,8 +30,8 @@ from torchvision.transforms import v2 as tranformsv2
 
 from Dataset.RVDataset import (SegmentationBatchSampler, SegmentationDatasetConfig,
                                SpectralSegmentationDataset, VisualizeData,
-                               CustomCollateFN)
-from Tool.Base import ChangeMaskOrder, GetTimeStampNow
+                               CollateFN)
+from Tool.Base import ChangeMaskOrder, GetColorsFromPalette, GetTimeStampNow
 from Tool.DataStorage import GetIndexDatasetPath
 
 
@@ -136,7 +136,7 @@ if _ActivateWB:
 DATASET_PATH = "data/dataset/SeasoNet"
 dsConfig = SegmentationDatasetConfig(
     ClassNames=list(LULC_CLASSES.values()),
-    ClassColors=RGB_COLORS[:NUM_CLASSES],
+    ClassColors=GetColorsFromPalette(NUM_CLASSES),
     NullClass=None,
     MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
     PatchSize=(PATCH_SIZE, PATCH_SIZE),
@@ -169,7 +169,7 @@ TRAIN_LOADER = DataLoader(
     num_workers=2,
     persistent_workers=False, 
     pin_memory=True,
-    collate_fn=CustomCollateFN,
+    collate_fn=CollateFN,
     # multiprocessing_context = torch.multiprocessing.get_context("spawn")
 )
 

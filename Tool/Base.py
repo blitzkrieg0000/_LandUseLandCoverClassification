@@ -5,7 +5,7 @@ import time
 from typing import List
 import numpy as np
 import torch
-
+import seaborn as sb
 
 class EarlyStopping():
     def __init__(self, patience=5, verbose=False, delta=0, checkpoint_save_path="checkpoint.pt"):
@@ -115,3 +115,13 @@ def GenerateRandomColors(num_colors):
         color = [random.randint(0, 255) for _ in range(3)]
         colors.append(color)
     return colors
+
+
+def GetColorsFromPalette(num_colors=1, pallete="husl", normalize=False):
+    colors = sb.color_palette(pallete, num_colors)
+    colors = np.array(colors)
+    if not normalize:
+        colors *= 255
+        colors = colors.astype(np.uint8)
+
+    return colors.tolist()

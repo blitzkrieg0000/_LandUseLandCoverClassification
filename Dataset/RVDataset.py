@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from abc import ABCMeta
 from enum import Enum
 
 from multiprocessing import Manager
@@ -27,7 +26,7 @@ from rastervision.pytorch_learner import (
 	SemanticSegmentationVisualizer)
 from torch.utils.data import DataLoader, Dataset, Sampler, random_split
 
-from Tool.Base import ChangeMaskOrder, LimitedCache
+from Tool.Base import ChangeMaskOrder, GetColorsFromPalette, LimitedCache
 from Tool.Util import (DataSourceMeta)
 from multiprocessing import Manager
 import seaborn as sb
@@ -56,7 +55,7 @@ def WorkerInitFN(worker_id):
 	dataset.set_worker_info(worker_id, worker_info.num_workers)
 
 
-def CustomCollateFN(batch):
+def CollateFN(batch):
 	# TODO Eksik olan None değerler, tekrar burada verisetinden çekilebiliyor mu? Dene (Recursive gibi olabilir).
 	data, label = zip(*batch)
 	return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
@@ -223,9 +222,9 @@ class TrackableIteratorState(NamedTuple):
 
 
 class SegmentationDatasetConfig(BaseModel):
-	"""Segmentation Veri Seti Konfigurasyon Sınıfı"""
+	"""Segmentation Veri Seti Konfigürasyon Sınıfı"""
 	ClassNames: Annotated[List[str], "Class Names"]
-	ClassColors: Annotated[List[str| tuple], "Class Colors"]
+	ClassColors: Annotated[List, "Class Colors"]
 	NullClass: Annotated[str, "Null Class"] = None
 	MaxWindowsPerScene: Annotated[int | float | None, "Max Windows Per Scene"]
 	DatasetRootPath: Annotated[str, "Dataset Index File"]
@@ -459,13 +458,24 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 
 
 class GeoSegmentationDatasetBatchSampler(Sampler):
-	def __init__(self, data_source: GeoSegmentationDataset):
+	class BatchSamplerMode(Enum):
+		Train = 0
+		Val = 1
+		Test = 2
+
+	def __init__(self, data_source: GeoSegmentationDataset, data_split:List[float]=[0.8, 0.1, 0.1], mode=BatchSamplerMode.Train):
 		self.Config: SegmentationDatasetConfig = data_source.Config
 		self.DataSource = data_source
 		self.Indices = []
 		self.Index = -1
 		self.RandomLimitCounter = 0
+		self.SplitRatios = data_split
+		self.Mode = mode
+		self.TrainIndexes = []
+		self.ValIndexes = []
+		self.TestIndexes = []
 		self.SetIndexes()
+		self.SetSplitIndexes()
 
 
 	def __len__(self):
@@ -487,7 +497,35 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		self.Indices = list(range(len(self.DataSource)))
 		if self.Config.Shuffle:
 			random.shuffle(self.Indices)
+
 		return self.Indices
+
+
+	def SetSplitIndexes(self):
+		if not self.SplitRatios:
+			self.TrainIndexes = self.Indices
+			return
+
+		# Split Indexes
+		if not np.isclose(sum(self.SplitRatios), 1.0):
+			raise ValueError("Sum of SplitRatios should be 1.0")
+		
+		segmentLen = [round(len(self.Indices) * ratio) for ratio in self.SplitRatios]
+
+		self.TrainIndexes = self.Indices[:segmentLen[0]]
+		self.ValIndexes = self.Indices[segmentLen[0] : segmentLen[0] + segmentLen[1]]
+		self.TestIndexes = self.Indices[segmentLen[0] + segmentLen[1]:]
+
+
+	def GetIndexes(self):
+		if self.Mode == self.BatchSamplerMode.Train:
+			indices = self.TrainIndexes
+		elif self.Mode == self.BatchSamplerMode.Val:
+			indices = self.ValIndexes
+		elif self.Mode == self.BatchSamplerMode.Test:
+			indices = self.TestIndexes
+
+		return indices
 
 
 	def CheckStoppingConditions(self):
@@ -496,7 +534,8 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 			print("Random Patch Done")
 			raise StopIteration
 		
-		elif len(self.DataSource.ExpiredScenes) >= len(self.DataSource):    # TODO Datasource'lar multiprocessing için bölünürse?
+		
+		elif len(set(self.GetIndexes()) - self.DataSource.ExpiredScenes.ToSet()) == 0:    # TODO Datasource'lar multiprocessing için bölünürse?
 			self.DataSource.ExpiredScenes.Clear()
 			self.RandomLimitCounter += 1
 
@@ -504,20 +543,24 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 
 
 	def PrepareBatchIndexes(self):
-		# 0 => 11     % 3
-		# 1 => 12     % 4
+		"""
+			TODO: Kaynak kalmayan indislerin yeninden düzenlenmesi gerekiyor:
+			0 => 11     % 3
+			1 => 12     % 4
+		
+			0 => State => Available: min(4, 3) = 3  
+			1 => State => Available: min(4, 4) = 4
+			7 => 1
+
+			[0 0 0 0 1 1 1 1]
+			[0 0 0 0 1 1 1 1]
+			[0 0 0 0 1 1 1 1]
+		"""	
+
+		indices = self.GetIndexes()
+
+		new_indices = list(set(indices)-self.DataSource.ExpiredScenes.ToSet())
 	
-		# 0 => State => Available: min(4, 3) = 3  
-		# 1 => State => Available: min(4, 4) = 4
-		#7 => 1
-
-		# [0 0 0 0 1 1 1 1]
-		# [0 0 0 0 1 1 1 1]
-		# [0 0 0 0 1 1 1 1]
-
-		new_indices = list(set(self.Indices)-self.DataSource.ExpiredScenes.ToSet())
-	
-
 		choices = np.random.choice(
 			new_indices,
 			size=len(self.Config.BatchRepeatDataSegment), # Hangi değişken
@@ -640,14 +683,49 @@ def SubsetFactory(base_class: GeoSegmentationDataset, split_rates:List[float]=[0
 
 #%%
 if "__main__" == __name__:
-	
+	LULC_CLASSES = {
+        0: "Continuous urban fabric",
+        1: "Discontinuous urban fabric",
+        2: "Industrial or commercial units",
+        3: "Road and rail networks and associated land",
+        4: "Port areas",
+        5: "Airports",
+        6: "Mineral extraction sites",
+        7: "Dump sites",
+        8: "Construction sites",
+        9: "Green urban areas",
+        10: "Sport and leisure facilities",
+        11: "Non-irrigated arable land",
+        12: "Vineyards",
+        13: "Fruit trees and berry plantations",
+        14: "Pastures",
+        15: "Broad-leaved forest",
+        16: "Coniferous forest",
+        17: "Mixed forest",
+        18: "Natural grasslands",
+        19: "Moors and heathland",
+        20: "Transitional woodland/shrub",
+        21: "Beaches, dunes, sands",
+        22: "Bare rock",
+        23: "Sparsely vegetated areas",
+        24: "Inland marshes",
+        25: "Peat bogs",
+        26: "Salt marshes",
+        27: "Intertidal flats",
+        28: "Water courses",
+        29: "Water bodies",
+        30: "Coastal lagoons",
+        31: "Estuaries",
+        32: "Sea and ocean"
+    }
+
 	# Config 1
 	DATASET_PATH = "data/dataset/SeasoNet/"
 	SHARED_ARTIFACTS = SharedArtifacts()
 	Config = SegmentationDatasetConfig(
-		ClassNames=["background", "excavation_area"],
-		ClassColors=["lightgray", "darkred"],
-		NullClass="background",
+		ClassNames=list(LULC_CLASSES.values()),
+		ClassColors=GetColorsFromPalette(len(LULC_CLASSES)),
+		NullClass=None,
 		MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
 		PatchSize=(120, 120),
 		PaddingSize=0,
@@ -660,37 +738,37 @@ if "__main__" == __name__:
 		DropLastBatch=True,
 		DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
 		# ChannelOrder=[1,2,3,7],
-		# DataLoadLimit=20
+		DataLoadLimit=20
 	)
 
 	# Config 2
-	DATASET_PATH = "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2"
-	SHARED_ARTIFACTS = SharedArtifacts()
-	Config = SegmentationDatasetConfig(
-		ClassNames=["background", "excavation_area"],
-		ClassColors=["lightgray", "darkred"],
-		NullClass="background",
-		MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-		PatchSize=(224, 224),
-		PaddingSize=0,
-		Shuffle=True,
-		DatasetRootPath=DATASET_PATH,
-		RandomLimit=0,
-		RandomPatch=False,
-		BatchDataChunkNumber=4,
-		BatchSize=16,
-		DropLastBatch=False,
-		StrideSize=112,
-		# ChannelOrder=[1,2,3,7],
-		# DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
-		# DataLoadLimit=20
-	)
+	# DATASET_PATH = "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2"
+	# SHARED_ARTIFACTS = SharedArtifacts()
+	# Config = SegmentationDatasetConfig(
+	# 	ClassNames=["background", "excavation_area"],
+	# 	ClassColors=["lightgray", "darkred"],
+	# 	NullClass="background",
+	# 	MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+	# 	PatchSize=(224, 224),
+	# 	PaddingSize=0,
+	# 	Shuffle=True,
+	# 	DatasetRootPath=DATASET_PATH,
+	# 	RandomLimit=0,
+	# 	RandomPatch=False,
+	# 	BatchDataChunkNumber=4,
+	# 	BatchSize=16,
+	# 	DropLastBatch=False,
+	# 	StrideSize=112,
+	# 	# ChannelOrder=[1,2,3,7],
+	# 	# DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
+	# 	# DataLoadLimit=20
+	# )
 
 
 	#%%
 	#! DATASET
 	dataset = GeoSegmentationDataset(Config, SHARED_ARTIFACTS)
-	
+
 
 	# TODO SUBSET AYARLA
 	#! SPLIT
@@ -702,18 +780,19 @@ if "__main__" == __name__:
 
 
 	#! DATALAODER
-	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset)
+	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=None)
 	TRAIN_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
 		num_workers=0,
-		persistent_workers=False, 
+		persistent_workers=False,
 		pin_memory=True,
-		collate_fn=CustomCollateFN,
+		collate_fn=CollateFN,
 		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
 	)
-	
+
 	VAL_LOADER = DataLoader(valset, batch_size=1)
+
 
 	#! SHOW RESULTS
 	print("Main Process Id:", os.getpid())
@@ -723,6 +802,5 @@ if "__main__" == __name__:
 
 
 	#! VisualizeData
-	VisualizeData(TRAIN_LOADER)
-	
+	# VisualizeData(TRAIN_LOADER)
 	

@@ -1,7 +1,5 @@
+from Tool.Base import GetColorsFromPalette
 
 
-
-import numpy as np
-
-
-print(np.zeros(33).shape)
+colors = GetColorsFromPalette()
+print(colors.tolist())

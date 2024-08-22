@@ -11,7 +11,7 @@ from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights, deeplab
 from torchvision.transforms import v2 as tranformsv2
 
 from Dataset.RVDataset import (SegmentationBatchSampler, SegmentationDatasetConfig,
-                               SpectralSegmentationDataset, VisualizePrediction, CustomCollateFN)
+                               SpectralSegmentationDataset, VisualizePrediction, CollateFN)
 from Tool.Base import ChangeMaskOrder
 from Tool.DataStorage import GetIndexDatasetPath
 
@@ -62,7 +62,7 @@ DATALOADER = DataLoader(
     num_workers=0,
     persistent_workers=False, 
     pin_memory=True,
-    collate_fn=CustomCollateFN,
+    collate_fn=CollateFN,
     # multiprocessing_context = torch.multiprocessing.get_context("spawn")
 )
 
