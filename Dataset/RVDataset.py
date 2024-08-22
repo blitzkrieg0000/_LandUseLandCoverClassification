@@ -779,10 +779,8 @@ if "__main__" == __name__:
 
 
 	#! DATALAODER
-	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.5, 0.4, 0.1])
-	customBatchSampler.SetMode(BatchSamplerMode.Train)
-
-	TRAIN_LOADER = DataLoader(
+	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.5, 0.4, 0.1], mode=BatchSamplerMode.Train)
+	DATA_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
 		num_workers=0,
@@ -792,13 +790,22 @@ if "__main__" == __name__:
 		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
 	)
 
+	for x in range(2):
+		#! SHOW RESULTS
+		customBatchSampler.SetMode(BatchSamplerMode.Train)
+		print("Main Process Id:", os.getpid())
+		for i, (inputs, targets) in enumerate(DATA_LOADER):
+			# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+			print(f"Step: {i}", inputs.shape, targets.shape)
 
-	#! SHOW RESULTS
-	print("Main Process Id:", os.getpid())
-	for i, (inputs, targets) in enumerate(TRAIN_LOADER):
-		# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-		print(f"Step: {i}", inputs.shape, targets.shape)
+		print("\n")	
+		customBatchSampler.SetMode(BatchSamplerMode.Test)
+		print("Main Process Id:", os.getpid())
+		for i, (inputs, targets) in enumerate(DATA_LOADER):
+			# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+			print(f"Step: {i}", inputs.shape, targets.shape)
 
+		print("\n-----------------------------------------------\n")
 
 	#! VisualizeData
 	# VisualizeData(TRAIN_LOADER)
