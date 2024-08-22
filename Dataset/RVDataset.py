@@ -626,6 +626,7 @@ if "__main__" == __name__:
 	#! DATASET
 	dataset = GeoSegmentationDataset(SeasoNet_Config, SHARED_ARTIFACTS)
 	
+	# TODO SUBSET AYARLA
 	#! SPLIT
 	valRatio = 0.0009
 	testRatio = 0.05
