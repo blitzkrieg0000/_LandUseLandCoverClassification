@@ -457,13 +457,17 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 
 
 
-class GeoSegmentationDatasetBatchSampler(Sampler):
-	class BatchSamplerMode(Enum):
-		Train = 0
-		Val = 1
-		Test = 2
+class BatchSamplerMode(Enum):
+	Train = 0
+	Val = 1
+	Test = 2
 
-	def __init__(self, data_source: GeoSegmentationDataset, data_split:List[float]=[0.8, 0.1, 0.1], mode=BatchSamplerMode.Train):
+
+
+class GeoSegmentationDatasetBatchSampler(Sampler):
+
+
+	def __init__(self, data_source: GeoSegmentationDataset, data_split:List[float]=None, mode=BatchSamplerMode.Train):
 		self.Config: SegmentationDatasetConfig = data_source.Config
 		self.DataSource = data_source
 		self.Indices = []
@@ -479,7 +483,7 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 
 
 	def __len__(self):
-		return self.Config.RandomLimit if self.Config.RandomPatch else len(self.DataSource)
+		return self.Config.RandomLimit if self.Config.RandomPatch else len(self.GetIndexes())
 
 
 	def __iter__(self):
@@ -518,14 +522,18 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 
 
 	def GetIndexes(self):
-		if self.Mode == self.BatchSamplerMode.Train:
+		if self.Mode == BatchSamplerMode.Train:
 			indices = self.TrainIndexes
-		elif self.Mode == self.BatchSamplerMode.Val:
+		elif self.Mode == BatchSamplerMode.Val:
 			indices = self.ValIndexes
-		elif self.Mode == self.BatchSamplerMode.Test:
+		elif self.Mode == BatchSamplerMode.Test:
 			indices = self.TestIndexes
 
 		return indices
+
+
+	def SetMode(self, mode: BatchSamplerMode):
+		self.Mode = mode
 
 
 	def CheckStoppingConditions(self):
@@ -770,17 +778,10 @@ if "__main__" == __name__:
 	dataset = GeoSegmentationDataset(Config, SHARED_ARTIFACTS)
 
 
-	# TODO SUBSET AYARLA
-	#! SPLIT
-	# trainset, valset = SubsetFactory(dataset, split_rates=[0.95, 0.05])
-	valRatio = 0.0009
-	testRatio = 0.05
-	trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
-	print(len(trainset), len(valset), len(testset))
-
-
 	#! DATALAODER
-	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=None)
+	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.5, 0.4, 0.1])
+	customBatchSampler.SetMode(BatchSamplerMode.Train)
+
 	TRAIN_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
@@ -790,8 +791,6 @@ if "__main__" == __name__:
 		collate_fn=CollateFN,
 		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
 	)
-
-	VAL_LOADER = DataLoader(valset, batch_size=1)
 
 
 	#! SHOW RESULTS
