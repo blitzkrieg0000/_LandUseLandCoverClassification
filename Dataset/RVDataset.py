@@ -130,43 +130,49 @@ class SharedQueueSet():
 	def __init__(self):
 		self.manager = Manager()
 		self.queue = self.manager.Queue()
-		self.items_set = self.manager.dict()  # Thread-safe dict to keep track of unique items
+		self.items_set = self.manager.dict()
+
 
 	def Add(self, item):
-		"""Add an item to the set-like queue if it's not already present."""
+		"""Öge, Queue'da Tanımlı değilse ekle. (Sette yoksa ekle)."""
 		if item not in self.items_set:
 			self.queue.put(item)
 			self.items_set[item] = True
 
+
 	def Get(self):
-		"""Get an item from the queue."""
+		"""Queue'dan son ögeyi al. (Sette yoksa ekle)."""
 		item = self.queue.get()
 		self.items_set.pop(item, None)
 		return item
 
 
 	def ToSet(self):
-		"""Convert the queue to a set."""
+		"""Queue'deki elemanları Set'e dönüştür."""
 		return set(self.items_set.keys())
 
 
 	def __contains__(self, item):
-		"""Check if the item is in the set-like queue."""
+		"""Queue'de olup olmadığını kontrol eder."""
 		return item in self.items_set
 
+
 	def __len__(self):
-		"""Return the number of unique items in the queue."""
+		"""Queue'daki eleman sayısını verir."""
 		return len(self.items_set)
 
+
 	def Empty(self):
-		"""Check if the queue is empty."""
+		"""Queue boş mu kontrol eder."""
 		return self.queue.empty()
 
+
 	def Clear(self):
-		"""Clear the queue and set."""
+		"""Queue'i temizler."""
 		while not self.queue.empty():
 			self.queue.get_nowait()
 		self.items_set.clear()
+
 
 
 class SharedArtifacts():
