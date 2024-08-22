@@ -157,7 +157,6 @@ dsConfig = SegmentationDatasetConfig(
 dataset = SpectralSegmentationDataset(dsConfig)
 
 
-
 valRatio = 0.0009
 testRatio = 0.05
 trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])

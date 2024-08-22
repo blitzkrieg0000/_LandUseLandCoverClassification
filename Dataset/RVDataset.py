@@ -595,68 +595,50 @@ if "__main__" == __name__:
 		BatchDataChunkNumber=16,
 		BatchSize=16,
 		DropLastBatch=True,
-		# ChannelOrder=[1,2,3,7],
 		DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
-		DataLoadLimit=20
-	)
-
-	# Config 2
-	DATASET_PATH = "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2"
-	SHARED_ARTIFACTS = SharedArtifacts()
-	LULC_Config = SegmentationDatasetConfig(
-		ClassNames=["background", "excavation_area"],
-		ClassColors=["lightgray", "darkred"],
-		NullClass="background",
-		MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-		PatchSize=(224, 224),
-		PaddingSize=0,
-		Shuffle=True,
-		DatasetRootPath=DATASET_PATH,
-		RandomLimit=0,
-		RandomPatch=False,
-		BatchDataChunkNumber=4,
-		BatchSize=16,
-		DropLastBatch=False,
-		StrideSize=112,
 		# ChannelOrder=[1,2,3,7],
-		# DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
 		# DataLoadLimit=20
 	)
 
+	# Config 2
+	# DATASET_PATH = "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2"
+	# SHARED_ARTIFACTS = SharedArtifacts()
+	# LULC_Config = SegmentationDatasetConfig(
+	# 	ClassNames=["background", "excavation_area"],
+	# 	ClassColors=["lightgray", "darkred"],
+	# 	NullClass="background",
+	# 	MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+	# 	PatchSize=(224, 224),
+	# 	PaddingSize=0,
+	# 	Shuffle=True,
+	# 	DatasetRootPath=DATASET_PATH,
+	# 	RandomLimit=0,
+	# 	RandomPatch=False,
+	# 	BatchDataChunkNumber=4,
+	# 	BatchSize=16,
+	# 	DropLastBatch=False,
+	# 	StrideSize=112,
+	# 	# ChannelOrder=[1,2,3,7],
+	# 	# DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
+	# 	# DataLoadLimit=20
+	# )
 
+	#! DATASET
 	dataset = GeoSegmentationDataset(SeasoNet_Config, SHARED_ARTIFACTS)
-	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset)
 	
-	TRAIN_LOADER = DataLoader(
-		dataset,
-		batch_sampler=customBatchSampler,
-		num_workers=0,
-		persistent_workers=False,
-		pin_memory=True,
-		collate_fn=CustomCollateFN,
-		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
-	)
-
-	print("Dataset Len:", len(TRAIN_LOADER))
-	for step, (inputs, targets) in enumerate(TRAIN_LOADER):
-		print(f"=>Step: {step}", inputs.shape, targets.shape)
-
-	#! VisualizeData
-	# VisualizeData(TRAIN_LOADER)
-
-	exit()
-
+	#! SPLIT
 	valRatio = 0.0009
 	testRatio = 0.05
 	trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
 	print(len(trainset), len(valset), len(testset))
 
-	customBatchSampler = SegmentationBatchSampler(dataset)
 
+	#! DATALAODER
+	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset)
 	TRAIN_LOADER = DataLoader(
 		trainset,
 		batch_sampler=customBatchSampler,
-		num_workers=2,
+		num_workers=0,
 		persistent_workers=False, 
 		pin_memory=True,
 		collate_fn=CustomCollateFN,
@@ -666,6 +648,7 @@ if "__main__" == __name__:
 	VAL_LOADER = DataLoader(valset, batch_size=1)
 
 
+	#! SHOW RESULTS
 	print("Main Process Id:", os.getpid())
 	# for i, (inputs, targets) in enumerate(TRAIN_LOADER):
 	#     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
