@@ -8,6 +8,7 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 NUM_CHANNELS = 10
 NUM_CLASSES = 33
 
+
 class DeepLabv3(torch.nn.Module):
     def __init__(self, input_channels=12, segmentation_classes=9, freeze_backbone=False):
         super(DeepLabv3, self).__init__()

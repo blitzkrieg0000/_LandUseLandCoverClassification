@@ -88,7 +88,7 @@ class LimitedCache():
 #! Functions
 # =================================================================================================================== #
 def ChangeMaskOrder(mask: torch.Tensor, classes: torch.Tensor):
-    extra_classes = classes.unique()
+    extra_classes = mask.unique()
     others = extra_classes[~torch.isin(extra_classes, classes)]
     other_maps = {x:0 for x in others}
     mapping = {x:i for i, x in enumerate(classes)}

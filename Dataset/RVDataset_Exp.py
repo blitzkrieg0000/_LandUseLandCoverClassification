@@ -618,7 +618,7 @@ if "__main__" == __name__:
 	TRAIN_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
-		num_workers=1,
+		num_workers=0,
 		persistent_workers=False,
 		pin_memory=True,
 		collate_fn=CustomCollateFN,

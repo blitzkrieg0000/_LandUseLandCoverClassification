@@ -27,10 +27,10 @@ from rastervision.pytorch_learner import (
 	SemanticSegmentationVisualizer)
 from torch.utils.data import DataLoader, Dataset, Sampler, random_split
 
-from Tool.Base import LimitedCache
+from Tool.Base import ChangeMaskOrder, LimitedCache
 from Tool.Util import (DataSourceMeta)
 from multiprocessing import Manager
-
+import seaborn as sb
 random.seed(72)
 
 # =================================================================================================================== #
@@ -90,7 +90,7 @@ def VisualizeData(dataloader, limit=None):
 				if i<buffer.shape[1]:
 					axs[i%4, i//4].imshow(buffer[bn, i].numpy(), cmap="viridis")
 					axs[i%4, i//4].set_title(f"Band {i+1}")
-			
+			print("Labels: ", mask[bn].unique())
 			axs[3, 3].imshow(mask[bn])
 			axs[3, 3].set_title("Ground Truth")
 			plt.pause(1)
@@ -99,6 +99,36 @@ def VisualizeData(dataloader, limit=None):
 			break
 
 	plt.tight_layout()
+	plt.show()
+
+
+def VisualizeClassDistribution(dataloader, num_classes=9):
+	fig, ax = plt.subplots()
+	plt.tight_layout()
+
+	uLabels = set()
+	hist = np.zeros(num_classes)
+	colors = sb.color_palette("husl", len(hist))
+	classes = torch.arange(1, num_classes + 1)
+
+	print("Main Process Id:", os.getpid())
+	for i, (inputs, targets) in enumerate(dataloader):
+		# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+		print(f"Step: {i}", inputs.shape, targets.shape)
+
+		targets = ChangeMaskOrder(targets, classes)
+
+		uniqueLabels: torch.Tensor = targets.unique()
+		uLabels.update(set(uniqueLabels.tolist()))
+		for label in uniqueLabels:
+			hist[label] += 1
+		
+		print("Labels: ", uLabels)
+		
+		ax.bar(np.arange(num_classes), hist, color=colors)
+		ax.set_xticks(np.arange(num_classes))
+		plt.pause(0.1)
+
 	plt.show()
 
 
@@ -235,7 +265,7 @@ class SegmentationDatasetConfig(BaseModel):
 
 
 
-class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
+class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 
 	class DataReadType(Enum):
 		IndexMetaFile=0
@@ -244,6 +274,7 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 	def __init__(self, config: SegmentationDatasetConfig, shared_artifacts: SharedArtifacts):
 		"""Segmentasyon datasetleri için bir Base classtır."""
 		self.Config = config
+		self.SharedArtifacts = shared_artifacts
 		self.ExpiredScenes = shared_artifacts.ExpiredScenes
 		self.SourceState = shared_artifacts.AvailableInSource
 
@@ -431,12 +462,10 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 	def __init__(self, data_source: GeoSegmentationDataset):
 		self.Config: SegmentationDatasetConfig = data_source.Config
 		self.DataSource = data_source
-		self.Indices = list(range(len(self.DataSource)))
+		self.Indices = []
 		self.Index = -1
 		self.RandomLimitCounter = 0
-
-		if self.Config.Shuffle:
-			random.shuffle(self.Indices)
+		self.SetIndexes()
 
 
 	def __len__(self):
@@ -452,6 +481,13 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		self.CheckStoppingConditions()
 		indexes = self.PrepareBatchIndexes()
 		return indexes
+
+
+	def SetIndexes(self):
+		self.Indices = list(range(len(self.DataSource)))
+		if self.Config.Shuffle:
+			random.shuffle(self.Indices)
+		return self.Indices
 
 
 	def CheckStoppingConditions(self):
@@ -506,6 +542,7 @@ class TrackableGeoIterator():
 		self._Cycle = cycle
 		self.Iterator = iterator
 		self.margin = margin
+
 
 	@property
 	def Margin(self):
@@ -575,13 +612,39 @@ class TrackableGeoIterator():
 
 
 
+def SubsetFactory(base_class: GeoSegmentationDataset, split_rates:List[float]=[0.95, 0.05]):
+	DataSubsets = random_split(base_class, split_rates)
+	SubsetList = []
+	for subset in DataSubsets:
+		class CustomSubset(base_class):
+			"""Dataset objesinin uzunluğunu kullanarak istenilen oranlarda indisleri parçalara ayıran; haliyle verisetini alt gruplara bölen bir sınıftır."""
+			def __init__(self):
+				super().__init__(base_class.Config, base_class.SharedArtifacts)
+				self.Dataset = dataset
+				self.Indexes = subset.indices
+				self.SplitRates = split_rates
+
+		
+			def __getitem__(self, idx):
+				return self.Dataset[self.Indexes[idx]]
+			
+		
+			def __len__(self):
+				return len(self.Indexes)
+		
+		SubsetList += [CustomSubset()]
+
+	return SubsetList
+
+
+
 #%%
 if "__main__" == __name__:
 	
 	# Config 1
 	DATASET_PATH = "data/dataset/SeasoNet/"
 	SHARED_ARTIFACTS = SharedArtifacts()
-	SeasoNet_Config = SegmentationDatasetConfig(
+	Config = SegmentationDatasetConfig(
 		ClassNames=["background", "excavation_area"],
 		ClassColors=["lightgray", "darkred"],
 		NullClass="background",
@@ -601,33 +664,37 @@ if "__main__" == __name__:
 	)
 
 	# Config 2
-	# DATASET_PATH = "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2"
-	# SHARED_ARTIFACTS = SharedArtifacts()
-	# LULC_Config = SegmentationDatasetConfig(
-	# 	ClassNames=["background", "excavation_area"],
-	# 	ClassColors=["lightgray", "darkred"],
-	# 	NullClass="background",
-	# 	MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-	# 	PatchSize=(224, 224),
-	# 	PaddingSize=0,
-	# 	Shuffle=True,
-	# 	DatasetRootPath=DATASET_PATH,
-	# 	RandomLimit=0,
-	# 	RandomPatch=False,
-	# 	BatchDataChunkNumber=4,
-	# 	BatchSize=16,
-	# 	DropLastBatch=False,
-	# 	StrideSize=112,
-	# 	# ChannelOrder=[1,2,3,7],
-	# 	# DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
-	# 	# DataLoadLimit=20
-	# )
+	DATASET_PATH = "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2"
+	SHARED_ARTIFACTS = SharedArtifacts()
+	Config = SegmentationDatasetConfig(
+		ClassNames=["background", "excavation_area"],
+		ClassColors=["lightgray", "darkred"],
+		NullClass="background",
+		MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+		PatchSize=(224, 224),
+		PaddingSize=0,
+		Shuffle=True,
+		DatasetRootPath=DATASET_PATH,
+		RandomLimit=0,
+		RandomPatch=False,
+		BatchDataChunkNumber=4,
+		BatchSize=16,
+		DropLastBatch=False,
+		StrideSize=112,
+		# ChannelOrder=[1,2,3,7],
+		# DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
+		# DataLoadLimit=20
+	)
 
+
+	#%%
 	#! DATASET
-	dataset = GeoSegmentationDataset(SeasoNet_Config, SHARED_ARTIFACTS)
+	dataset = GeoSegmentationDataset(Config, SHARED_ARTIFACTS)
 	
+
 	# TODO SUBSET AYARLA
 	#! SPLIT
+	# trainset, valset = SubsetFactory(dataset, split_rates=[0.95, 0.05])
 	valRatio = 0.0009
 	testRatio = 0.05
 	trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
@@ -637,7 +704,7 @@ if "__main__" == __name__:
 	#! DATALAODER
 	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset)
 	TRAIN_LOADER = DataLoader(
-		trainset,
+		dataset,
 		batch_sampler=customBatchSampler,
 		num_workers=0,
 		persistent_workers=False, 
@@ -648,17 +715,14 @@ if "__main__" == __name__:
 	
 	VAL_LOADER = DataLoader(valset, batch_size=1)
 
-
 	#! SHOW RESULTS
 	print("Main Process Id:", os.getpid())
-	# for i, (inputs, targets) in enumerate(TRAIN_LOADER):
-	#     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-	#     print("\n", "-"*10)
-	#     print(f"Batch: {i}", inputs.shape, targets.shape)
-	#     print("-"*10, "\n")
-	#     print(f"Batch: {i}")
+	for i, (inputs, targets) in enumerate(TRAIN_LOADER):
+		# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
+		print(f"Step: {i}", inputs.shape, targets.shape)
+
 
 	#! VisualizeData
-	VisualizeData(VAL_LOADER)
+	VisualizeData(TRAIN_LOADER)
 	
 	
