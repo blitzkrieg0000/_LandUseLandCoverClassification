@@ -15,7 +15,7 @@ class EarlyStopping():
         self.best_score = None
         self.early_stop = False
         self.delta = delta
-        self.val_loss_min = np.Inf
+        self.val_loss_min = np.inf
         self.checkpoint_save_path = checkpoint_save_path
 
 
@@ -24,7 +24,7 @@ class EarlyStopping():
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.SaveCheckpoint(val_loss, model)
         elif score < self.best_score + self.delta:
             self.counter += 1
             print(f"EarlyStopping patience counter: {self.counter} / {self.patience}")
@@ -32,24 +32,27 @@ class EarlyStopping():
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.SaveCheckpoint(val_loss, model)
             self.counter = 0
 
 
-    def save_checkpoint(self, val_loss, model):
+    def SaveCheckpoint(self, val_loss, model):
         if self.verbose:
             print(f"Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...")
         torch.save(model.state_dict(), self.checkpoint_save_path)
         self.val_loss_min = val_loss
 
 
+
 class LimitedCache():
     def __init__(self, max_size_mb: int=1024, max_items: int = 300):
-        self.cache = {}
-        self.order = deque()
-        self.max_size = max_size_mb * 1024 * 1024
-        self.current_size = 0
-        self.max_items = max_items
+        self.Cache = {}
+        self.Order = deque()
+        self.MaxSize = max_size_mb * 1024 * 1024
+        self.CurrentSize = 0
+        self.MaxItem = max_items
+        # TODO: 1 Shared Cache ayarı yap
+        # TODO: 2 Persistent Flag Ayarı Yap, Yoksa cache verileri multiprocessing aşamasında silinebilir.
 
 
     def __GetSize(self, item) -> int:
@@ -57,27 +60,28 @@ class LimitedCache():
     
 
     def Get(self, key):
-        return self.cache.get(key)
+        return self.Cache.get(key)
 
 
     def Add(self, key, value):
-        item_size = self.__GetSize(key) + self.__GetSize(value)
+        itemSize = self.__GetSize(key) + self.__GetSize(value)
 
         # Yeni elemanı eklemeden önce mevcut öğe sayısını kontrol et
-        while len(self.order) >= self.max_items or self.current_size + item_size > self.max_size:
-            if len(self.order) == 0:
+        while len(self.Order) >= self.MaxItem or self.CurrentSize + itemSize > self.MaxSize:
+            if len(self.Order) == 0:
                 # Eğer deque boşsa, çık
                 break
 
             # En eski key-value çiftini sil
-            oldest_key = self.order.popleft()
-            oldest_value = self.cache.pop(oldest_key)
-            self.current_size -= (self.__GetSize(oldest_key) + self.__GetSize(oldest_value))
+            oldestKey = self.Order.popleft()
+            oldestValue = self.Cache.pop(oldestKey)
+            self.CurrentSize -= (self.__GetSize(oldestKey) + self.__GetSize(oldestValue))
 
         # Yeni key-value çiftini ekle
-        self.cache[key] = value
-        self.order.append(key)
-        self.current_size += item_size
+        self.Cache[key] = value
+        self.Order.append(key)
+        self.CurrentSize += itemSize
+
 
 
 # =================================================================================================================== #

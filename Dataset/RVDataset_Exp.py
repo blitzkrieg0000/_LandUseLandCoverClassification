@@ -4,14 +4,13 @@ from abc import ABCMeta
 from enum import Enum
 
 from multiprocessing import Manager
-from multiprocessing.managers import DictProxy
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from Dataset.FileReader import GeoDataReader
 import random
-from typing import Annotated, Any, List, NamedTuple, Set, Tuple
+from typing import Annotated, List, Set, Tuple
 
 import numpy as np
 import torch
@@ -57,7 +56,6 @@ def WorkerInitFN(worker_id):
 
 
 def CustomCollateFN(batch):
-	# TODO Eksik olan None değerler, tekrar burada verisetinden çekilebiliyor mu? Dene (Recursive gibi olabilir).
 	data, label = zip(*batch)
 	return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
 
@@ -68,7 +66,7 @@ def ShowDatasetViaVisualizer(dataset):
 	vis.plot_batch(x, y, show=True)
 
 
-def ShowBatchRaster(raster):
+def ShowRaster(raster):
 	fig, ax = plt.subplots(4, 4, figsize=(7, 7))
 	for i in range(12):
 		ax[i%4, i//4].matshow(raster[:, :, [i]], cmap="viridis")
@@ -180,15 +178,7 @@ class SharedQueueSet():
 class SharedArtifacts():
 	"""Shared Memory aracılığı ile processler arası paylaşılan ögelerin tutulmasını sağlayan bir sınıftır."""
 	ExpiredScenes = SharedQueueSet()
-	AvailableInSource: DictProxy[Any, TrackableIteratorState] = Manager().dict()
-
-
-
-class TrackableIteratorState(NamedTuple):
-	Id: int
-	Index: int
-	Available: int
-	Expired: bool
+	AvailableInSource = Manager().dict()
 
 
 
@@ -235,7 +225,7 @@ class SegmentationDatasetConfig(BaseModel):
 
 
 
-class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
+class SegmentationDatasetBase(Dataset, metaclass=ABCMeta):
 
 	class DataReadType(Enum):
 		IndexMetaFile=0
@@ -245,10 +235,10 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 		"""Segmentasyon datasetleri için bir Base classtır."""
 		self.Config = config
 		self.ExpiredScenes = shared_artifacts.ExpiredScenes
-		self.SourceState = shared_artifacts.AvailableInSource
+		self.AvailableInSource = shared_artifacts.AvailableInSource
 
 		self.DatasetIndexMeta: List[DataSourceMeta]
-		self.GeoDatasetCache = LimitedCache(max_size_mb=611, max_items=100)
+		self.GeoDatasetCache = LimitedCache(max_size_mb=512, max_items=100)
 		
 		# Worker Info
 		self.StartIndex = 0
@@ -264,12 +254,15 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 
 
 	def __getitem__(self, idx):
+
+
 		# [0, 0, 0, 0, 1, 1 ,1, 1] 
 		# new_indices = list(set(self.Indices)-self.ExpiredScenes.ToSet())
 
+
 		# READ SOURCE META
 		_meta = self.GetIndexMetaById(idx)
-		
+
 		# READ SCENE AND CACHE
 		geoDataset = self.ReadSceneDataByIndexMeta(_meta)         
 		
@@ -279,14 +272,11 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 		# CHECK EXPIRING STATUS
 		self.CheckGeoIteratorSceneExpiring(geoDataset)
 
-		# UPDATE TRACKABLE STATE
-		self.UpdateGeoIteratorState(_meta, geoDataset)
-
 		return data, label
 
 
 	def ReadMetaData(self, method=DataReadType.IndexMetaFile) -> DataSourceMeta:
-		if method == GeoSegmentationDataset.DataReadType.IndexMetaFile:
+		if method == SegmentationDatasetBase.DataReadType.IndexMetaFile:
 			self.DatasetIndexMeta: List[DataSourceMeta] = GeoDataReader.ReadDatasetMetaFromIndexFile(self.Config.DatasetRootPath)
 		else:
 			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen geçerli bir veri okuma yöntemi tipi seçiniz: {self.DataReadType}")
@@ -340,12 +330,12 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 		)
 
 
-	def ReadSceneDataByIndexMeta(self, _meta: DataSourceMeta) -> TrackableGeoIterator:
-		geoDataset = self.GeoDatasetCache.Get(_meta.Scene)
-		print(f"GeoSegmentationDataset:-> index: {_meta.Index}, scene: {_meta.Scene}, pid: {os.getpid()}")
+	def ReadSceneDataByIndexMeta(self, _data: DataSourceMeta) -> TrackableGeoIterator:
+		geoDataset = self.GeoDatasetCache.Get(_data.Scene)
+		print(f"SpectralSegmentationDataset:-> index: {_data.Index}, scene: {_data.Scene}, pid: {os.getpid()}")
 		if geoDataset is None:
 			# Read Scene
-			scene = self.LoadRasterSceneWithRasterMask(_meta)
+			scene = self.LoadRasterSceneWithRasterMask(_data)
 			
 			# Convert to GeoDataset
 			if self.Config.RandomPatch:
@@ -355,14 +345,11 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 				geoDataset = self.CreateSlidingWindowGeoDatasetFromScene(scene) # Random vs Sliding
 
 			# Wrap GeoDataset
-			geoDataset = TrackableGeoIterator(geoDataset, _meta.Index, cycle=True, margin=self.Config.IteratorMargin)
-
-			# State Tut
-			self.SyncGeoIteratorState(_meta, geoDataset)
+			geoDataset = TrackableGeoIterator(geoDataset, _data.Index, cycle=True, margin=self.Config.IteratorMargin)
 
 			# Cache
-			self.RegisterToCache(_meta, geoDataset)
-			
+			self.GeoDatasetCache.Add(_data.Scene, geoDataset)       
+
 		return geoDataset
 
 
@@ -378,23 +365,7 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 			self.ExpiredScenes.Add(geoDataset.Id)
 			geoDataset.Reset()
 
-
-	def RegisterToCache(self, _meta: DataSourceMeta, geoDataset:TrackableGeoIterator):
-		self.GeoDatasetCache.Add(_meta.Scene, geoDataset)
-
-
-	def SyncGeoIteratorState(self, _meta: DataSourceMeta, geoDataset:TrackableGeoIterator):
-		if _meta.Scene in self.SourceState.keys():
-			values = self.SourceState[_meta.Scene]                
-			geoDataset.SetState(TrackableGeoIterator(*values))    # Load Iterator State
-
-		return _meta.Scene
-
-
-	def UpdateGeoIteratorState(self, _meta: DataSourceMeta, geoDataset:TrackableGeoIterator):
-		self.SourceState[_meta.Scene] = tuple(geoDataset.GetState()) # Update Storage
-		
-		return _meta.Scene
+		self.AvailableInSource[geoDataset.Id] = geoDataset.Available
 
 
 	def SetWorkerInfo(self, worker_id, num_workers):
@@ -408,7 +379,7 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 	def GetWorkerInfo(self, verbose=False):
 		worker_info = torch.utils.data.get_worker_info()
 		if worker_info and verbose:
-			print(f"GeoSegmentationDataset:-> Worker Id: {worker_info.id+1}/{worker_info.num_workers} workers")
+			print(f"SpectralSegmentationDataset:-> Worker Id: {worker_info.id+1}/{worker_info.num_workers} workers")
 		return worker_info
 
 
@@ -427,8 +398,8 @@ class GeoSegmentationDataset(Dataset, metaclass=ABCMeta):
 
 
 
-class GeoSegmentationDatasetBatchSampler(Sampler):
-	def __init__(self, data_source: GeoSegmentationDataset):
+class SegmentationBatchSamplerBase(Sampler):
+	def __init__(self, data_source: SegmentationDatasetBase):
 		self.Config: SegmentationDatasetConfig = data_source.Config
 		self.DataSource = data_source
 		self.Indices = list(range(len(self.DataSource)))
@@ -563,25 +534,65 @@ class TrackableGeoIterator():
 		self.Index = -1
 		self._Expired = False
 
+#%%
+#! Experimental
+class SegmentationBatchSampler(SegmentationBatchSamplerBase):
+	def __init__(self, data_source: SegmentationDatasetBase):
+		super().__init__(data_source)
+	
 
-	def GetState(self):
-		state = TrackableIteratorState(Id=self.Id, Index=self.Index, Available=self.Available, Expired=self._Expired)
-		print(state)
-		return state
+	def __iter__(self):
+		return super().__iter__()
 
 
-	def SetState(self, state: TrackableIteratorState):
-		self.Index, self.Available, self._Expired = state.Index, state.Available, state.Expired
+	def __next__(self):
+		indexes = super().__next__()
+		return indexes
+
+
+
+class SpectralSegmentationDataset(SegmentationDatasetBase):
+	def __init__(self, config: SegmentationDatasetConfig, shared_artifacts: SharedArtifacts):
+		super().__init__(config, shared_artifacts)
+
+
+	def __getitem__(self, idx):
+		data, label = super().__getitem__(idx)
+		return data, label
+
+
+
+class CustomSubset(Dataset):
+	"""Dataset objesinin uzunluğunu kullanarak istenilen oranlarda indisleri parçalara ayıran; haliyle verisetini alt gruplara bölen bir sınıftır."""
+	def __init__(self, dataset: Dataset, split_rates: List[float]=[0.0009, 0.05]) -> None:
+		self.Dataset = dataset
+		self.indices = []
+		self.SplitRates = split_rates
+
+	
+	def CreateSubsets(self):
+		self.DataSubsets = random_split(self.Dataset, self.SplitRates)
+		self.indices = self.DataSubsets[0].indices
+
+
+	def __getitem__(self, idx):
+		if isinstance(idx, list):
+			return self.Dataset[[self.indices[i] for i in idx]]
+		return self.Dataset[self.indices[idx]]
+	
+
+	def __len__(self):
+		return len(self.indices)
+
 
 
 
 #%%
 if "__main__" == __name__:
-	
-	# Config 1
 	DATASET_PATH = "data/dataset/SeasoNet/"
-	SHARED_ARTIFACTS = SharedArtifacts()
-	SeasoNet_Config = SegmentationDatasetConfig(
+	SHARED_ARTIFACTS=SharedArtifacts()
+
+	dsConfig = SegmentationDatasetConfig(
 		ClassNames=["background", "excavation_area"],
 		ClassColors=["lightgray", "darkred"],
 		NullClass="background",
@@ -600,49 +611,26 @@ if "__main__" == __name__:
 		DataLoadLimit=20
 	)
 
-	# Config 2
-	DATASET_PATH = "data/dataset/ImpactObservatory-LULC_Sentinel2-L1C_10m_Cukurova_v0.0.2"
-	SHARED_ARTIFACTS = SharedArtifacts()
-	LULC_Config = SegmentationDatasetConfig(
-		ClassNames=["background", "excavation_area"],
-		ClassColors=["lightgray", "darkred"],
-		NullClass="background",
-		MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-		PatchSize=(224, 224),
-		PaddingSize=0,
-		Shuffle=True,
-		DatasetRootPath=DATASET_PATH,
-		RandomLimit=0,
-		RandomPatch=False,
-		BatchDataChunkNumber=4,
-		BatchSize=16,
-		DropLastBatch=False,
-		StrideSize=112,
-		# ChannelOrder=[1,2,3,7],
-		# DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
-		# DataLoadLimit=20
-	)
-
-
-	dataset = GeoSegmentationDataset(SeasoNet_Config, SHARED_ARTIFACTS)
-	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset)
+	dataset = SpectralSegmentationDataset(dsConfig, SHARED_ARTIFACTS)
+	
+	customBatchSampler = SegmentationBatchSamplerBase(dataset)
 	
 	TRAIN_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
-		num_workers=0,
+		num_workers=1,
 		persistent_workers=False,
 		pin_memory=True,
 		collate_fn=CustomCollateFN,
 		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
 	)
 
-	print("Dataset Len:", len(TRAIN_LOADER))
-	for step, (inputs, targets) in enumerate(TRAIN_LOADER):
-		print(f"=>Step: {step}", inputs.shape, targets.shape)
+	# print("Dataset Len:", len(TRAIN_LOADER))
+	# for step, (inputs, targets) in enumerate(TRAIN_LOADER):
+	# 	print(f"=>Step: {step}", inputs.shape, targets.shape)
 
 	#! VisualizeData
-	# VisualizeData(TRAIN_LOADER)
+	VisualizeData(TRAIN_LOADER)
 
 	exit()
 
