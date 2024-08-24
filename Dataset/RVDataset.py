@@ -416,7 +416,7 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 	def SyncGeoIteratorState(self, _meta: DataSourceMeta, geoDataset:TrackableGeoIterator):
 		if _meta.Scene in self.SourceState.keys():
 			values = self.SourceState[_meta.Scene]                
-			geoDataset.SetState(TrackableGeoIterator(*values))    # Load Iterator State
+			geoDataset.SetState(TrackableIteratorState(*values))    # Load Iterator State
 
 		return _meta.Scene
 
@@ -512,7 +512,7 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 
 		# Split Indexes
 		if not np.isclose(sum(self.SplitRatios), 1.0):
-			raise ValueError("Sum of SplitRatios should be 1.0")
+			raise ValueError("SplitRatios değerler toplamı 1.0 olmalıdır.")
 		
 		segmentLen = [round(len(self.Indices) * ratio) for ratio in self.SplitRatios]
 
@@ -659,7 +659,7 @@ class TrackableGeoIterator():
 
 
 	def SetState(self, state: TrackableIteratorState):
-		self.Index, self.Available, self._Expired = state.Index, state.Available, state.Expired
+		self.Index, self._Expired = state.Index, state.Expired
 
 
 

@@ -4,16 +4,15 @@ import os
 import sys
 import time
 
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+os.environ["DATA_INDEX_FILE"] = "data/dataset/.index"
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
+
 from matplotlib import pyplot as plt
 
 from Model.DeepLabv3 import DeepLabv3
 from Model.Loss import DiceLoss
 from Tool.Const import RGB_COLORS
-
-os.environ["DATA_INDEX_FILE"] = "data/dataset/.index"
-os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import random
 
@@ -28,8 +27,8 @@ from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
                                              deeplabv3_resnet50)
 from torchvision.transforms import v2 as tranformsv2
 
-from Dataset.RVDataset import (BatchSamplerMode, GeoSegmentationDataset, GeoSegmentationDatasetBatchSampler, SegmentationBatchSampler, SegmentationDatasetConfig, SharedArtifacts,
-                               SpectralSegmentationDataset, VisualizeData,
+from Dataset.RVDataset import (BatchSamplerMode, GeoSegmentationDataset, GeoSegmentationDatasetBatchSampler, SegmentationDatasetConfig, SharedArtifacts,
+                                VisualizeData,
                                CollateFN)
 from Tool.Base import ChangeMaskOrder, GetColorsFromPalette, GetTimeStampNow
 from Tool.DataStorage import GetIndexDatasetPath
@@ -94,8 +93,9 @@ PATCH_SIZE = 120   # Window Size
 STRIDE_SIZE = 64   # Sliding Window
 NUM_CHANNELS = 10  # Multispektral kanal sayısı
 NUM_CLASSES = len(LULC_CLASSES)    # Maskedeki sınıf sayısı
-classes = torch.arange(1, NUM_CLASSES + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
-_ActivateWB = False
+VAL_INTERVAL = 300
+classes = torch.arange(1, NUM_CLASSES + 1).to(DEVICE) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
+_ActivateWB = True
 
 
 # =================================================================================================================== #
@@ -160,9 +160,11 @@ dsConfig = SegmentationDatasetConfig(
 #! DATASET
 dataset = GeoSegmentationDataset(dsConfig, SHARED_ARTIFACTS)
 
-
+valRatio = 0.0009
+testRatio = 0.05
+trainRatio = 1 - valRatio - testRatio
 #! DATALAODER
-customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.5, 0.4, 0.1], mode=BatchSamplerMode.Train)
+customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[trainRatio, valRatio, testRatio], mode=BatchSamplerMode.Train)
 DATA_LOADER = DataLoader(
     dataset,
     batch_sampler=customBatchSampler,
@@ -236,7 +238,7 @@ dice_loss_fn = DiceLoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 
 
-VAL_INTERVAL = 50
+
 if "__main__" == __name__:
     def WBMask(bg_img, pred_mask, true_mask):
         return wandb.Image(bg_img, masks={
@@ -298,7 +300,7 @@ if "__main__" == __name__:
 
 
         # Loss
-        loss = cross_entropy_loss_fn(outputs, targets) + dice_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
+        loss = cross_entropy_loss_fn(outputs, targets) # + dice_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
 
         # Backward Pass
         loss.backward()
