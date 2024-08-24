@@ -1,5 +1,5 @@
 import torch
-from torchvision.transforms import v2 as tranformsv2
+from torchvision.transforms import v2 as transformsv2
 
 from Model.Enum import ModelType
 from Tool.Base import ChangeMaskOrder
@@ -48,8 +48,8 @@ class _3DCNN:
 
 DATA_TRANSFORMS_BY_MODEL = {
     ModelType.UNET_3D: {
-        "input_transform": tranformsv2.Compose([_3DCNN.NormalizeSentinel2Transform()]),
-        "output_transform": tranformsv2.Compose([_3DCNN.Output2Class()]),
-        "target_transform": tranformsv2.Compose([_3DCNN.Target2OneHot()])
+        "input_transform": transformsv2.Compose([_3DCNN.NormalizeSentinel2Transform()]),
+        "output_transform": transformsv2.Compose([_3DCNN.Output2Class()]),
+        "target_transform": transformsv2.Compose([_3DCNN.Target2OneHot()])
     }
 }
