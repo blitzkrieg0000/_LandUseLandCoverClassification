@@ -28,7 +28,7 @@ from torchvision.models.segmentation import (DeepLabV3_ResNet50_Weights,
                                              deeplabv3_resnet50)
 from torchvision.transforms import v2 as tranformsv2
 
-from Dataset.RVDataset import (SegmentationBatchSampler, SegmentationDatasetConfig,
+from Dataset.RVDataset import (BatchSamplerMode, GeoSegmentationDataset, GeoSegmentationDatasetBatchSampler, SegmentationBatchSampler, SegmentationDatasetConfig, SharedArtifacts,
                                SpectralSegmentationDataset, VisualizeData,
                                CollateFN)
 from Tool.Base import ChangeMaskOrder, GetColorsFromPalette, GetTimeStampNow
@@ -95,7 +95,7 @@ STRIDE_SIZE = 64   # Sliding Window
 NUM_CHANNELS = 10  # Multispektral kanal sayısı
 NUM_CLASSES = len(LULC_CLASSES)    # Maskedeki sınıf sayısı
 classes = torch.arange(1, NUM_CLASSES + 1) # torch.tensor([1, 2, 4, 5, 7, 8, 9, 10, 11]) # Maskedeki sınıflar
-_ActivateWB = True
+_ActivateWB = False
 
 
 # =================================================================================================================== #
@@ -134,46 +134,44 @@ if _ActivateWB:
 # =================================================================================================================== #
 # DATASET_PATH = GetIndexDatasetPath("LULC_IO_10m")
 DATASET_PATH = "data/dataset/SeasoNet"
+SHARED_ARTIFACTS = SharedArtifacts()
+
 dsConfig = SegmentationDatasetConfig(
     ClassNames=list(LULC_CLASSES.values()),
-    ClassColors=GetColorsFromPalette(NUM_CLASSES),
+    ClassColors=GetColorsFromPalette(len(LULC_CLASSES)),
     NullClass=None,
-    MaxWindowsPerScene=None,                        # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
-    PatchSize=(PATCH_SIZE, PATCH_SIZE),
+    MaxWindowsPerScene=None,                         # TODO Rasterlar arasında random ve her bir raster içinde randomu ayarla
+    PatchSize=(120, 120),
     PaddingSize=0,
     Shuffle=True,
-    RandomLimitCounter=EPOCHS,
     DatasetRootPath=DATASET_PATH,
+    RandomLimit=0,
     RandomPatch=False,
-    BatchDataRepeatNumber=1,
-    BatchSize=BATCH_SIZE,
+    BatchDataChunkNumber=16,
+    BatchSize=16,
     DropLastBatch=True,
     StrideSize=STRIDE_SIZE,
-    BatchDataChunkNumber=BATCH_CHUNK_NUMBER,
     DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
+    DataLoadLimit=None
     # ChannelOrder=[1,2,3,7]
 )
 
-dataset = SpectralSegmentationDataset(dsConfig)
+
+#! DATASET
+dataset = GeoSegmentationDataset(dsConfig, SHARED_ARTIFACTS)
 
 
-valRatio = 0.0009
-testRatio = 0.05
-trainset, valset, testset = random_split(dataset, [1-testRatio-valRatio, valRatio, testRatio])
-print(len(trainset), len(valset), len(testset))
-
-customBatchSampler = SegmentationBatchSampler(dataset, config=dsConfig)
-TRAIN_LOADER = DataLoader(
+#! DATALAODER
+customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.5, 0.4, 0.1], mode=BatchSamplerMode.Train)
+DATA_LOADER = DataLoader(
     dataset,
     batch_sampler=customBatchSampler,
-    num_workers=2,
-    persistent_workers=False, 
+    num_workers=0,
+    persistent_workers=False,
     pin_memory=True,
     collate_fn=CollateFN,
     # multiprocessing_context = torch.multiprocessing.get_context("spawn")
 )
-
-VAL_LOADER = DataLoader(valset, batch_size=1)
 
 
 ##! --------------- Visualize Data --------------- !##
@@ -238,7 +236,7 @@ dice_loss_fn = DiceLoss()
 optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE)
 
 
-VAL_INTERVAL = 300
+VAL_INTERVAL = 50
 if "__main__" == __name__:
     def WBMask(bg_img, pred_mask, true_mask):
         return wandb.Image(bg_img, masks={
@@ -258,7 +256,9 @@ if "__main__" == __name__:
     # =================================================================================================================== #
     totalAccuracy = 0
     result_images = []
-    for step, (inputs, targets) in enumerate(TRAIN_LOADER):
+
+    customBatchSampler.SetMode(BatchSamplerMode.Train)
+    for step, (inputs, targets) in enumerate(DATA_LOADER):
         inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
         
         
@@ -318,9 +318,10 @@ if "__main__" == __name__:
 
             #! Validation
             if (step+1) % VAL_INTERVAL == 0:
+                customBatchSampler.SetMode(BatchSamplerMode.Val)
                 totalValAccuracy = 0
                 model.eval() # Evaluate Mode
-                for val_step, (inputs, targets) in enumerate(VAL_LOADER):
+                for val_step, (inputs, targets) in enumerate(DATA_LOADER):
                     inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
                     targets = ChangeMaskOrder(targets, classes)
 
@@ -330,8 +331,8 @@ if "__main__" == __name__:
                     targets = targets.squeeze(1)
                     valAccuracy = 100 * (class_indices == targets).float().mean()
                     totalValAccuracy += valAccuracy.item()
-                print(f"Step {step+1}, Val Accuracy: {totalValAccuracy / len(VAL_LOADER)}")
-                wandb.log({"val_accuracy": totalValAccuracy / len(VAL_LOADER)})
+                print(f"Step {step+1}, Val Accuracy: {totalValAccuracy / len(DATA_LOADER)}")
+                wandb.log({"val_accuracy": totalValAccuracy / len(DATA_LOADER)})
 
 
                 #! WBVisualize
@@ -346,7 +347,8 @@ if "__main__" == __name__:
                 result_images+=[wb_image]
                 wandb.log({"Segmentation Visualization": result_images})
                 result_images.clear()
-
+            
+            customBatchSampler.SetMode(BatchSamplerMode.Train)
 
             # Wandb
             if _ActivateWB:
@@ -359,7 +361,6 @@ if "__main__" == __name__:
                 except Exception as e:
                     print(e)
 
-            
             # Save
             if step % 300 == 0:
                 date_time_now = GetTimeStampNow()
