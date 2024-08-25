@@ -48,7 +48,6 @@ random_number = random.randint(0, 1000)
 # =================================================================================================================== #
 #! PARAMS
 # =================================================================================================================== #
-
 LULC_CLASSES = {
         0: "Continuous urban fabric",
         1: "Discontinuous urban fabric",
@@ -201,7 +200,7 @@ model.train()
 ##! --------------- Load Weights --------------- !##
 # %87 Acc => Weight/DeepLabv3/deeplabv3_v1_128_6000_18.08.2024_13.48.38.pth
 # %94 Acc => Weight/DeepLabv3/deeplabv3_v1_10_1800_18.08.2024_14.17.00.pth
-# model.load_state_dict(torch.load("Weight/DeepLabv3/deeplabv3_v1.pth"))
+model.load_state_dict(torch.load("Weight/DeepLabv3/deeplabv3_v1_75_8100_25.08.2024_06.23.57.pth"))
 
 ## --------------- Wandb Watch --------------- !##
 # wandb.watch(MODEL, log="all")
@@ -300,7 +299,7 @@ if "__main__" == __name__:
 
 
         # Loss
-        loss = cross_entropy_loss_fn(outputs, targets) # + dice_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
+        loss = cross_entropy_loss_fn(outputs, targets) + dice_loss_fn(outputs, targets) # + focal_loss_fn(outputs, targets)
 
         # Backward Pass
         loss.backward()

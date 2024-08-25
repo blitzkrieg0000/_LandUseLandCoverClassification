@@ -24,7 +24,9 @@ from rastervision.pytorch_learner import (
 	SemanticSegmentationRandomWindowGeoDataset,
 	SemanticSegmentationSlidingWindowGeoDataset,
 	SemanticSegmentationVisualizer)
+
 from torch.utils.data import DataLoader, Dataset, Sampler, random_split
+
 
 from Tool.Base import ChangeMaskOrder, GetColorsFromPalette, LimitedCache
 from Tool.Util import (DataSourceMeta)
@@ -157,58 +159,58 @@ def VisualizePrediction(buffer, mask, predicted):
 # =================================================================================================================== #
 #! CLASS
 # =================================================================================================================== #
-class SharedQueueSet():
-	def __init__(self):
-		self.manager = Manager()
-		self.queue = self.manager.Queue()
-		self.items_set = self.manager.dict()
+class SharedSetStorage():
+    def __init__(self):
+        self.manager = Manager()
+        self.items_set = self.manager.dict()
 
 
-	def Add(self, item):
-		"""Öge, Queue'da Tanımlı değilse ekle. (Sette yoksa ekle)."""
-		if item not in self.items_set:
-			self.queue.put(item)
-			self.items_set[item] = True
+    def Add(self, key:str, value:Any=None):
+        """Öge, Storage'da Tanımlı değilse ekle. (Sette yoksa ekle)."""
+        if key not in self.items_set:
+            self.items_set[key] = value or key
 
 
-	def Get(self):
-		"""Queue'dan son ögeyi al. (Sette yoksa ekle)."""
-		item = self.queue.get()
-		self.items_set.pop(item, None)
-		return item
+    def Get(self):
+        """Storage'dan son ögeyi al. (Sette yoksa ekle)."""
+        return self.items_set.values()
 
 
-	def ToSet(self):
-		"""Queue'deki elemanları Set'e dönüştür."""
-		return set(self.items_set.keys())
+    def ToSet(self):
+        """Storage'deki elemanları Set'e dönüştür."""
+        return set(self.items_set.values())
 
 
-	def __contains__(self, item):
-		"""Queue'de olup olmadığını kontrol eder."""
-		return item in self.items_set
+    def __contains__(self, item):
+        """Storage'de olup olmadığını kontrol eder."""
+        return item in self.items_set
 
 
-	def __len__(self):
-		"""Queue'daki eleman sayısını verir."""
-		return len(self.items_set)
+    def __len__(self):
+        """Storage'daki eleman sayısını verir."""
+        return len(self.items_set)
 
 
-	def Empty(self):
-		"""Queue boş mu kontrol eder."""
-		return self.queue.empty()
+    def Remove(self, items):
+        """Storage'daki elemanları kaldırır."""
+        for item in items:
+            if item in self.items_set:
+                self.items_set.pop(item, None)
 
 
-	def Clear(self):
-		"""Queue'i temizler."""
-		while not self.queue.empty():
-			self.queue.get_nowait()
-		self.items_set.clear()
+    def Empty(self):
+        """Storage boş mu kontrol eder."""
+        return len(self.items_set)==0
+
+
+    def Clear(self):
+        self.items_set.clear()
 
 
 
 class SharedArtifacts():
 	"""Shared Memory aracılığı ile processler arası paylaşılan ögelerin tutulmasını sağlayan bir sınıftır."""
-	ExpiredScenes = SharedQueueSet()
+	ExpiredScenes = SharedSetStorage()
 	AvailableInSource: DictProxy[Any, TrackableIteratorState] = Manager().dict()
 
 
@@ -240,6 +242,7 @@ class SegmentationDatasetConfig(BaseModel):
 	ChannelOrder: Annotated[List[int], "Channel Order"] = None
 	DataFilter: Annotated[List[str], "Data Filter By File Name Regex"] = None
 	DataLoadLimit: Annotated[int, "Data Limiter"] = None
+	Verbose: Annotated[bool, "Verbose"] = False
 
 	@property
 	def BatchRepeatDataSegment(self):
@@ -267,7 +270,7 @@ class SegmentationDatasetConfig(BaseModel):
 class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 
 	class DataReadType(Enum):
-		IndexMetaFile=0
+		IndexMetaFile = 0
 
 
 	def __init__(self, config: SegmentationDatasetConfig, shared_artifacts: SharedArtifacts):
@@ -278,7 +281,7 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 		self.SourceState = shared_artifacts.AvailableInSource
 
 		self.DatasetIndexMeta: List[DataSourceMeta]
-		self.GeoDatasetCache = LimitedCache(max_size_mb=611, max_items=100)
+		self.GeoDatasetCache = LimitedCache(max_size_mb=698, max_items=100)
 		
 		# Worker Info
 		self.StartIndex = 0
@@ -372,7 +375,8 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 
 	def ReadSceneDataByIndexMeta(self, _meta: DataSourceMeta) -> TrackableGeoIterator:
 		geoDataset = self.GeoDatasetCache.Get(_meta.Scene)
-		print(f"GeoSegmentationDataset:-> index: {_meta.Index}, scene: {_meta.Scene}, pid: {os.getpid()}")
+		if self.Config.Verbose:
+			print(f"GeoSegmentationDataset:-> index: {_meta.Index}, scene: {_meta.Scene}, pid: {os.getpid()}")
 		if geoDataset is None:
 			# Read Scene
 			scene = self.LoadRasterSceneWithRasterMask(_meta)
@@ -380,7 +384,8 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 			# Convert to GeoDataset
 			if self.Config.RandomPatch:
 				geoDataset = self.CreateRandomWindowGeoDatasetFromScene(scene)
-				print(len(geoDataset))
+				if self.Config.Verbose:
+					print("Scene Length: ", len(geoDataset))
 			else:
 				geoDataset = self.CreateSlidingWindowGeoDatasetFromScene(scene) # Random vs Sliding
 
@@ -465,8 +470,6 @@ class BatchSamplerMode(Enum):
 
 
 class GeoSegmentationDatasetBatchSampler(Sampler):
-
-
 	def __init__(self, data_source: GeoSegmentationDataset, data_split:List[float]=None, mode=BatchSamplerMode.Train):
 		self.Config: SegmentationDatasetConfig = data_source.Config
 		self.DataSource = data_source
@@ -520,6 +523,7 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		self.ValIndexes = self.Indices[segmentLen[0] : segmentLen[0] + segmentLen[1]]
 		self.TestIndexes = self.Indices[segmentLen[0] + segmentLen[1]:]
 
+		print(f"\nTrain: {self.TrainIndexes}\nVal: {self.ValIndexes}\nTest: {self.TestIndexes}")
 
 	def GetIndexes(self):
 		if self.Mode == BatchSamplerMode.Train:
@@ -544,7 +548,10 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		
 		
 		elif len(set(self.GetIndexes()) - self.DataSource.ExpiredScenes.ToSet()) == 0:    # TODO Datasource'lar multiprocessing için bölünürse?
-			self.DataSource.ExpiredScenes.Clear()
+			if self.Config.Verbose:
+				print(f"All Scenes Done, Mode: {self.Mode} ")
+			
+			self.DataSource.ExpiredScenes.Remove(set(self.GetIndexes()))
 			self.RandomLimitCounter += 1
 
 			raise StopIteration
@@ -565,9 +572,7 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 			[0 0 0 0 1 1 1 1]
 		"""	
 
-		indices = self.GetIndexes()
-
-		new_indices = list(set(indices)-self.DataSource.ExpiredScenes.ToSet())
+		new_indices = list(set(self.GetIndexes())-self.DataSource.ExpiredScenes.ToSet())
 	
 		choices = np.random.choice(
 			new_indices,
@@ -578,8 +583,9 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		# recovery = []
 		# for id_choice, seg_count in zip(choices, self.Config.BatchRepeatDataSegment):
 		# 	self.DataSource.AvailableInSource[id_choice]
-
-		print(f"Sampler: {choices} x {self.Config.BatchRepeatDataSegment}")
+		if self.Config.Verbose:
+			print(f"Sampler: {choices} x {self.Config.BatchRepeatDataSegment}")
+		
 		return np.repeat(choices, self.Config.BatchRepeatDataSegment)
 
 
@@ -654,7 +660,6 @@ class TrackableGeoIterator():
 
 	def GetState(self):
 		state = TrackableIteratorState(Id=self.Id, Index=self.Index, Available=self.Available, Expired=self._Expired)
-		print(state)
 		return state
 
 
@@ -692,40 +697,40 @@ def SubsetFactory(base_class: GeoSegmentationDataset, split_rates:List[float]=[0
 #%%
 if "__main__" == __name__:
 	LULC_CLASSES = {
-        0: "Continuous urban fabric",
-        1: "Discontinuous urban fabric",
-        2: "Industrial or commercial units",
-        3: "Road and rail networks and associated land",
-        4: "Port areas",
-        5: "Airports",
-        6: "Mineral extraction sites",
-        7: "Dump sites",
-        8: "Construction sites",
-        9: "Green urban areas",
-        10: "Sport and leisure facilities",
-        11: "Non-irrigated arable land",
-        12: "Vineyards",
-        13: "Fruit trees and berry plantations",
-        14: "Pastures",
-        15: "Broad-leaved forest",
-        16: "Coniferous forest",
-        17: "Mixed forest",
-        18: "Natural grasslands",
-        19: "Moors and heathland",
-        20: "Transitional woodland/shrub",
-        21: "Beaches, dunes, sands",
-        22: "Bare rock",
-        23: "Sparsely vegetated areas",
-        24: "Inland marshes",
-        25: "Peat bogs",
-        26: "Salt marshes",
-        27: "Intertidal flats",
-        28: "Water courses",
-        29: "Water bodies",
-        30: "Coastal lagoons",
-        31: "Estuaries",
-        32: "Sea and ocean"
-    }
+		0: "Continuous urban fabric",
+		1: "Discontinuous urban fabric",
+		2: "Industrial or commercial units",
+		3: "Road and rail networks and associated land",
+		4: "Port areas",
+		5: "Airports",
+		6: "Mineral extraction sites",
+		7: "Dump sites",
+		8: "Construction sites",
+		9: "Green urban areas",
+		10: "Sport and leisure facilities",
+		11: "Non-irrigated arable land",
+		12: "Vineyards",
+		13: "Fruit trees and berry plantations",
+		14: "Pastures",
+		15: "Broad-leaved forest",
+		16: "Coniferous forest",
+		17: "Mixed forest",
+		18: "Natural grasslands",
+		19: "Moors and heathland",
+		20: "Transitional woodland/shrub",
+		21: "Beaches, dunes, sands",
+		22: "Bare rock",
+		23: "Sparsely vegetated areas",
+		24: "Inland marshes",
+		25: "Peat bogs",
+		26: "Salt marshes",
+		27: "Intertidal flats",
+		28: "Water courses",
+		29: "Water bodies",
+		30: "Coastal lagoons",
+		31: "Estuaries",
+		32: "Sea and ocean"
+	}
 
 	# Config 1
 	DATASET_PATH = "data/dataset/SeasoNet/"
@@ -741,12 +746,13 @@ if "__main__" == __name__:
 		DatasetRootPath=DATASET_PATH,
 		RandomLimit=0,
 		RandomPatch=False,
-		BatchDataChunkNumber=16,
-		BatchSize=16,
+		BatchDataChunkNumber=4,
+		BatchSize=4,
 		DropLastBatch=True,
 		DataFilter=[".*_10m_RGB", ".*_10m_IR", ".*_20m"],
 		# ChannelOrder=[1,2,3,7],
-		DataLoadLimit=20
+		DataLoadLimit=13,
+		Verbose=True
 	)
 
 	# Config 2
@@ -779,7 +785,7 @@ if "__main__" == __name__:
 
 
 	#! DATALAODER
-	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.5, 0.4, 0.1], mode=BatchSamplerMode.Train)
+	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.8, 0.1, 0.1], mode=BatchSamplerMode.Train)
 	DATA_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
