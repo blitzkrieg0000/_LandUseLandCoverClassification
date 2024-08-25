@@ -138,9 +138,9 @@ class LogColorDefaults(Enum):
 	Error = "red"
 
 
-def ConsoleLog(message, color: LogColorDefaults=LogColorDefaults.Info, bold: bool=False, italic:bool=False, underline:bool=False):
-	atts = ["bold", "italic", "underline"]
-	conds = [bold, italic, underline]
+def ConsoleLog(message, color: LogColorDefaults=LogColorDefaults.Info, bold: bool=False, blink:bool=False, underline:bool=False):
+	atts = ["bold", "blink", "underline"]
+	conds = [bold, blink, underline]
 	attrs = [att for att, cond in zip(atts, conds) if cond]
 	msg = colored(message, color.value, attrs=attrs)
 	print(msg)

@@ -298,6 +298,7 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 
 
 	def __getitem__(self, idx):
+		ConsoleLog(f"Dataset Process Id: {os.getpid()}", LogColorDefaults.Remarkable)
 		# [0, 0, 0, 0, 1, 1 ,1, 1] 
 		# new_indices = list(set(self.Indices)-self.ExpiredScenes.ToSet())
 
@@ -787,19 +788,19 @@ if "__main__" == __name__:
 	dataset = GeoSegmentationDataset(Config, SHARED_ARTIFACTS)
 	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.8, 0.1, 0.1], mode=BatchSamplerMode.Train)
 
-
 	#! DATALOADER
+	NUM_WORKERS = 1
 	DATA_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
-		num_workers=1,
-		persistent_workers=False,
+		num_workers=NUM_WORKERS,
+		persistent_workers=NUM_WORKERS>0,
 		pin_memory=True,
 		collate_fn=CollateFN,
 		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
 	)
 	
-	ConsoleLog(f"Main Process Id: {os.getpid()}", LogColorDefaults.Warning, bold=True, underline=True, italic=True)
+	ConsoleLog(f"Main Process Id: {os.getpid()}", LogColorDefaults.Warning, bold=True, underline=True, blink=True)
 	for epoch in range(2):
 		print(f"\n------------------------{epoch}-----------------------\n")
 		#! SHOW RESULTS
