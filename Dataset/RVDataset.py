@@ -11,7 +11,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from Dataset.FileReader import GeoDataReader
 import random
 from typing import Annotated, Any, List, NamedTuple, Set, Tuple
-
+import time
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
@@ -28,11 +28,12 @@ from rastervision.pytorch_learner import (
 from torch.utils.data import DataLoader, Dataset, Sampler, random_split
 
 
-from Tool.Base import ChangeMaskOrder, GetColorsFromPalette, LimitedCache
+from Tool.Base import ChangeMaskOrder, ConsoleLog, GetColorsFromPalette, LimitedCache, LogColorDefaults
 from Tool.Util import (DataSourceMeta)
 from multiprocessing import Manager
 import seaborn as sb
 random.seed(72)
+
 
 # =================================================================================================================== #
 #! CONSTS
@@ -112,7 +113,7 @@ def VisualizeClassDistribution(dataloader, num_classes=9):
 	colors = sb.color_palette("husl", len(hist))
 	classes = torch.arange(1, num_classes + 1)
 
-	print("Main Process Id:", os.getpid())
+	ConsoleLog(f"Main Process Id: {os.getpid()}", LogColorDefaults.Warning)
 	for i, (inputs, targets) in enumerate(dataloader):
 		# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 		print(f"Step: {i}", inputs.shape, targets.shape)
@@ -495,6 +496,7 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 
 	def __next__(self):
 		self.Index+=1
+		ConsoleLog(f"Sampler Process Id: {os.getpid()}", LogColorDefaults.Warning)
 		self.CheckStoppingConditions()
 		indexes = self.PrepareBatchIndexes()
 		return indexes
@@ -524,6 +526,7 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		self.TestIndexes = self.Indices[segmentLen[0] + segmentLen[1]:]
 
 		print(f"\nTrain: {self.TrainIndexes}\nVal: {self.ValIndexes}\nTest: {self.TestIndexes}")
+
 
 	def GetIndexes(self):
 		if self.Mode == BatchSamplerMode.Train:
@@ -782,36 +785,38 @@ if "__main__" == __name__:
 	#%%
 	#! DATASET
 	dataset = GeoSegmentationDataset(Config, SHARED_ARTIFACTS)
-
-
-	#! DATALAODER
 	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.8, 0.1, 0.1], mode=BatchSamplerMode.Train)
+
+
+	#! DATALOADER
 	DATA_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
-		num_workers=0,
+		num_workers=1,
 		persistent_workers=False,
 		pin_memory=True,
 		collate_fn=CollateFN,
 		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
 	)
-
-	for x in range(2):
+	
+	ConsoleLog(f"Main Process Id: {os.getpid()}", LogColorDefaults.Warning, bold=True, underline=True, italic=True)
+	for epoch in range(2):
+		print(f"\n------------------------{epoch}-----------------------\n")
 		#! SHOW RESULTS
 		customBatchSampler.SetMode(BatchSamplerMode.Train)
-		print("Main Process Id:", os.getpid())
+		
 		for i, (inputs, targets) in enumerate(DATA_LOADER):
 			# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 			print(f"Step: {i}", inputs.shape, targets.shape)
 
-		print("\n")	
+		print("\n===\n")	
 		customBatchSampler.SetMode(BatchSamplerMode.Test)
-		print("Main Process Id:", os.getpid())
 		for i, (inputs, targets) in enumerate(DATA_LOADER):
 			# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 			print(f"Step: {i}", inputs.shape, targets.shape)
 
 		print("\n-----------------------------------------------\n")
+		time.sleep(3)
 
 	#! VisualizeData
 	# VisualizeData(TRAIN_LOADER)

@@ -1,9 +1,11 @@
 from collections import deque
+from enum import Enum
 import random
 import sys
 import time
 from typing import List
 import numpy as np
+from termcolor import colored
 import torch
 import seaborn as sb
 
@@ -125,3 +127,20 @@ def GetColorsFromPalette(num_colors=1, pallete="husl", normalize=False):
         colors = colors.astype(np.uint8)
 
     return colors.tolist()
+
+
+class LogColorDefaults(Enum):
+	Info = "white"
+	Footer = "black"
+	Remarkable = "blue"
+	Success = "green"
+	Warning = "yellow"
+	Error = "red"
+
+
+def ConsoleLog(message, color: LogColorDefaults=LogColorDefaults.Info, bold: bool=False, italic:bool=False, underline:bool=False):
+	atts = ["bold", "italic", "underline"]
+	conds = [bold, italic, underline]
+	attrs = [att for att, cond in zip(atts, conds) if cond]
+	msg = colored(message, color.value, attrs=attrs)
+	print(msg)
