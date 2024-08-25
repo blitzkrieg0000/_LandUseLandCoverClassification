@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 
 from multiprocessing import Manager, set_start_method
-from multiprocessing.managers import DictProxy
+from multiprocessing.managers import DictProxy, SyncManager
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -32,7 +32,7 @@ from Tool.Base import ChangeMaskOrder, ConsoleLog, GetColorsFromPalette, Limited
 from Tool.Util import (DataSourceMeta)
 import seaborn as sb
 random.seed(72)
-
+import multiprocessing as mp
 
 # =================================================================================================================== #
 #! CONSTS
@@ -160,9 +160,8 @@ def VisualizePrediction(buffer, mask, predicted):
 #! CLASS
 # =================================================================================================================== #
 class SharedSetStorage():
-    def __init__(self):
-        self.manager = Manager()
-        self.items_set = self.manager.dict()
+    def __init__(self, manager: SyncManager):
+        self.items_set = manager.dict()
 
 
     def Add(self, key:str, value:Any=None):
@@ -210,9 +209,11 @@ class SharedSetStorage():
 
 class SharedArtifacts():
 	"""Shared Memory aracılığı ile processler arası paylaşılan ögelerin tutulmasını sağlayan bir sınıftır."""
-	ExpiredScenes = SharedSetStorage()
-	AvailableInSource: DictProxy[Any, TrackableIteratorState] = Manager().dict()
-	# AvailableWorkers: DictProxy[Any, Any] = Manager().dict()
+	def __init__(self, manager: SyncManager):
+		self.ExpiredScenes = SharedSetStorage(manager)
+		self.AvailableInSource: DictProxy[Any, TrackableIteratorState] = Manager().dict()
+		# AvailableWorkers: DictProxy[Any, Any] = Manager().dict()
+
 
 
 class TrackableIteratorState(NamedTuple):
@@ -422,8 +423,9 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 
 	def SyncGeoIteratorState(self, _meta: DataSourceMeta, geoDataset:TrackableGeoIterator):
 		if _meta.Scene in self.SourceState.keys():
-			values = self.SourceState[_meta.Scene]                
-			geoDataset.SetState(TrackableIteratorState(*values))    # Load Iterator State
+			values = self.SourceState[_meta.Scene]
+			state = TrackableIteratorState(*values)                
+			geoDataset.SetState(state)    # Load Iterator State
 
 		return _meta.Scene
 
@@ -690,6 +692,11 @@ class TrackableGeoIterator():
 
 
 if "__main__" == __name__:
+	try:
+		mp.set_start_method("spawn")
+	except:
+		...
+
 	LULC_CLASSES = {
 		0: "Continuous urban fabric",
 		1: "Discontinuous urban fabric",
@@ -728,7 +735,8 @@ if "__main__" == __name__:
 
 	# Config 1
 	DATASET_PATH = "data/dataset/SeasoNet/"
-	SHARED_ARTIFACTS = SharedArtifacts()
+	manager = Manager()
+	SHARED_ARTIFACTS = SharedArtifacts(manager)
 	Config = SegmentationDatasetConfig(
 		ClassNames=list(LULC_CLASSES.values()),
 		ClassColors=GetColorsFromPalette(len(LULC_CLASSES)),
@@ -786,7 +794,7 @@ if "__main__" == __name__:
 		persistent_workers=NUM_WORKERS>0,
 		pin_memory=True,
 		collate_fn=CollateFN,
-		multiprocessing_context = torch.multiprocessing.get_context("spawn")
+		multiprocessing_context=mp.get_context("spawn")
 	)
 	
 	ConsoleLog(f"Main Process Id: {os.getpid()}", LogColorDefaults.Warning, bold=True, underline=True, blink=True)
