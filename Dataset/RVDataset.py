@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 
-from multiprocessing import Manager
+from multiprocessing import Manager, set_start_method
 from multiprocessing.managers import DictProxy
 import os
 import sys
@@ -25,12 +25,11 @@ from rastervision.pytorch_learner import (
 	SemanticSegmentationSlidingWindowGeoDataset,
 	SemanticSegmentationVisualizer)
 
-from torch.utils.data import DataLoader, Dataset, Sampler, random_split
+from torch.utils.data import DataLoader, Dataset, Sampler
 
 
 from Tool.Base import ChangeMaskOrder, ConsoleLog, GetColorsFromPalette, LimitedCache, LogColorDefaults
 from Tool.Util import (DataSourceMeta)
-from multiprocessing import Manager
 import seaborn as sb
 random.seed(72)
 
@@ -213,7 +212,7 @@ class SharedArtifacts():
 	"""Shared Memory aracılığı ile processler arası paylaşılan ögelerin tutulmasını sağlayan bir sınıftır."""
 	ExpiredScenes = SharedSetStorage()
 	AvailableInSource: DictProxy[Any, TrackableIteratorState] = Manager().dict()
-
+	# AvailableWorkers: DictProxy[Any, Any] = Manager().dict()
 
 
 class TrackableIteratorState(NamedTuple):
@@ -267,13 +266,11 @@ class SegmentationDatasetConfig(BaseModel):
 		return ClassConfig(names=self.ClassNames, colors=self.ClassColors, null_class=self.NullClass)
 
 
+class DataReadType(Enum):
+	IndexMetaFile = 0
+
 
 class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
-
-	class DataReadType(Enum):
-		IndexMetaFile = 0
-
-
 	def __init__(self, config: SegmentationDatasetConfig, shared_artifacts: SharedArtifacts):
 		"""Segmentasyon datasetleri için bir Base classtır."""
 		self.Config = config
@@ -284,13 +281,16 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 		self.DatasetIndexMeta: List[DataSourceMeta]
 		self.GeoDatasetCache = LimitedCache(max_size_mb=698, max_items=100)
 		
+		# Auto Load Metadata
+		self.ReadMetaData()
+
 		# Worker Info
 		self.StartIndex = 0
 		self.EndIndex = -1
+		self.SegmentSize = None
 		self.WorkerId = None
-
-		# Auto Load Metadata
-		self.ReadMetaData()
+		self.NumWorkers = None
+		self.SetWorkerInfo()
 
 
 	def __len__(self):
@@ -321,10 +321,10 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 
 
 	def ReadMetaData(self, method=DataReadType.IndexMetaFile) -> DataSourceMeta:
-		if method == GeoSegmentationDataset.DataReadType.IndexMetaFile:
+		if method == DataReadType.IndexMetaFile:
 			self.DatasetIndexMeta: List[DataSourceMeta] = GeoDataReader.ReadDatasetMetaFromIndexFile(self.Config.DatasetRootPath)
 		else:
-			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen geçerli bir veri okuma yöntemi tipi seçiniz: {self.DataReadType}")
+			raise ValueError(f"Bilinmeyen Yöntem: {method}. Lütfen geçerli bir veri okuma yöntemi tipi seçiniz: {DataReadType}")
 		
 		if self.Config.DataLoadLimit:
 			self.DatasetIndexMeta = np.random.choice(self.DatasetIndexMeta, self.Config.DataLoadLimit, replace=False)
@@ -434,19 +434,20 @@ class GeoSegmentationDataset(Dataset):  # , metaclass=ABCMeta
 		return _meta.Scene
 
 
-	def SetWorkerInfo(self, worker_id, num_workers):
-		self.WorkerId = worker_id
-		self.NumWorkers = num_workers
-		self.segment_size = len(self.DatasetIndexMeta) // self.NumWorkers
-		self.StartIndex = self.WorkerId * self.segment_size
-		self.EndIndex = (self.WorkerId + 1) * self.segment_size if self.WorkerId != self.NumWorkers - 1 else len(self.__len__())
-
-
 	def GetWorkerInfo(self, verbose=False):
 		worker_info = torch.utils.data.get_worker_info()
 		if worker_info and verbose:
 			print(f"GeoSegmentationDataset:-> Worker Id: {worker_info.id+1}/{worker_info.num_workers} workers")
 		return worker_info
+
+
+	def SetWorkerInfo(self):
+		workerInfo = self.GetWorkerInfo()
+		self.WorkerId = workerInfo.id if workerInfo else 0
+		self.NumWorkers = workerInfo.num_workers if workerInfo else 1
+		self.SegmentSize = len(self.DatasetIndexMeta) // max(self.NumWorkers, 1)
+		self.StartIndex = self.WorkerId * self.SegmentSize
+		self.EndIndex = (self.WorkerId + 1) * self.SegmentSize if self.WorkerId != self.NumWorkers - 1 else self.__len__()
 
 
 	def GetNext(self, iterable, idx):
@@ -485,6 +486,7 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		self.TestIndexes = []
 		self.SetIndexes()
 		self.SetSplitIndexes()
+		self.UsedIndexes = set()
 
 
 	def __len__(self):
@@ -497,6 +499,7 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 
 	def __next__(self):
 		self.Index+=1
+		# TODO Kullanılan dataset processleri aktif durumdaysa, burayı sync et
 		ConsoleLog(f"Sampler Process Id: {os.getpid()}", LogColorDefaults.Warning)
 		self.CheckStoppingConditions()
 		indexes = self.PrepareBatchIndexes()
@@ -537,6 +540,10 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		elif self.Mode == BatchSamplerMode.Test:
 			indices = self.TestIndexes
 
+		# Eğer indislerin hepsi kullanılmışsa, kullanılmış indis listesini sıfırla.
+		if len(set(indices) - self.UsedIndexes)==0:
+			self.UsedIndexes -= set(indices)
+			
 		return indices
 
 
@@ -549,7 +556,6 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		if self.Config.RandomPatch and self.Index >= self.__len__():      # Sadece Random Patch ise belirli bir epoch sayısı kadar batchler için index üretir.
 			print("Random Patch Done")
 			raise StopIteration
-		
 		
 		elif len(set(self.GetIndexes()) - self.DataSource.ExpiredScenes.ToSet()) == 0:    # TODO Datasource'lar multiprocessing için bölünürse?
 			if self.Config.Verbose:
@@ -575,13 +581,18 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 			[0 0 0 0 1 1 1 1]
 			[0 0 0 0 1 1 1 1]
 		"""	
+		
+		# Kullanılmış indisleri çıkar, böylece bir sonraki aşamaya farklı indisler dahil olur.
+		# Ancak Expire olmayanları kullanma
+		expiredScenes = self.DataSource.ExpiredScenes.ToSet()
+		newIndices = (set(self.GetIndexes()) - expiredScenes) - self.UsedIndexes
+		newIndices = list(newIndices)
 
-		new_indices = list(set(self.GetIndexes())-self.DataSource.ExpiredScenes.ToSet())
-	
+		# Indexlerden rastgele seçim yap
 		choices = np.random.choice(
-			new_indices,
+			newIndices,
 			size=len(self.Config.BatchRepeatDataSegment), # Hangi değişken
-			replace=len(new_indices) < len(self.Config.BatchRepeatDataSegment)
+			replace=len(newIndices) < len(self.Config.BatchRepeatDataSegment)
 		)
 
 		# recovery = []
@@ -590,7 +601,12 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		if self.Config.Verbose:
 			print(f"Sampler: {choices} x {self.Config.BatchRepeatDataSegment}")
 		
-		return np.repeat(choices, self.Config.BatchRepeatDataSegment)
+		indexes = np.repeat(choices, self.Config.BatchRepeatDataSegment).tolist()
+		
+		# Kullanılan indisleri tüm indisler kullanılıncaya kadar kaydet
+		self.UsedIndexes.update(indexes)
+		
+		return indexes
 
 
 
@@ -672,33 +688,7 @@ class TrackableGeoIterator():
 
 
 
-def SubsetFactory(base_class: GeoSegmentationDataset, split_rates:List[float]=[0.95, 0.05]):
-	DataSubsets = random_split(base_class, split_rates)
-	SubsetList = []
-	for subset in DataSubsets:
-		class CustomSubset(base_class):
-			"""Dataset objesinin uzunluğunu kullanarak istenilen oranlarda indisleri parçalara ayıran; haliyle verisetini alt gruplara bölen bir sınıftır."""
-			def __init__(self):
-				super().__init__(base_class.Config, base_class.SharedArtifacts)
-				self.Dataset = dataset
-				self.Indexes = subset.indices
-				self.SplitRates = split_rates
 
-		
-			def __getitem__(self, idx):
-				return self.Dataset[self.Indexes[idx]]
-			
-		
-			def __len__(self):
-				return len(self.Indexes)
-		
-		SubsetList += [CustomSubset()]
-
-	return SubsetList
-
-
-
-#%%
 if "__main__" == __name__:
 	LULC_CLASSES = {
 		0: "Continuous urban fabric",
@@ -783,7 +773,6 @@ if "__main__" == __name__:
 	# )
 
 
-	#%%
 	#! DATASET
 	dataset = GeoSegmentationDataset(Config, SHARED_ARTIFACTS)
 	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.8, 0.1, 0.1], mode=BatchSamplerMode.Train)
@@ -797,12 +786,13 @@ if "__main__" == __name__:
 		persistent_workers=NUM_WORKERS>0,
 		pin_memory=True,
 		collate_fn=CollateFN,
-		# multiprocessing_context = torch.multiprocessing.get_context("spawn")
+		multiprocessing_context = torch.multiprocessing.get_context("spawn")
 	)
 	
 	ConsoleLog(f"Main Process Id: {os.getpid()}", LogColorDefaults.Warning, bold=True, underline=True, blink=True)
+	
 	for epoch in range(2):
-		print(f"\n------------------------{epoch}-----------------------\n")
+		print(f"\n------------------------{epoch}------------------------\n")
 		#! SHOW RESULTS
 		customBatchSampler.SetMode(BatchSamplerMode.Train)
 		
@@ -816,7 +806,7 @@ if "__main__" == __name__:
 			# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
 			print(f"Step: {i}", inputs.shape, targets.shape)
 
-		print("\n-----------------------------------------------\n")
+		print("\n------------------------------------------------\n")
 		time.sleep(3)
 
 	#! VisualizeData
