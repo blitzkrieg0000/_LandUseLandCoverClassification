@@ -3,7 +3,7 @@ import gradio as gr
 from folium import plugins
 
 def CreateMap():
-    m = folium.Map(location=[37.511905, 38.51532], zoom_start=13, world_copy_jump=True, tiles=None)
+    m = folium.Map(location=[37.511905, 38.51532], zoom_start=6, world_copy_jump=True, tiles=None)
     
     folium.TileLayer(
         tiles="http://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -61,9 +61,17 @@ def CreateMap():
     ).add_to(m)
 
     plugins.Geocoder().add_to(m)
-    plugins.Draw(export=True, filename="drawing.geojson", position="topleft").add_to(m)
+    plugins.Draw(export=True, filename="drawing.geojson", position="topleft", show_geometry_on_click=False).add_to(m)
     folium.LayerControl(position="bottomleft",).add_to(m)
+    plugins.Fullscreen(
+        position="topright",
+        title="Expand me",
+        title_cancel="Exit me",
+        force_separate_button=True,
+    ).add_to(m)
 
+
+    # Drawing Control
     mapObjectInHTML = m.get_name()
 
     m.get_root().html.add_child(folium.Element("""
