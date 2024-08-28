@@ -4,7 +4,7 @@ from folium import plugins
 
 
 def CreateMap():
-    m = folium.Map(location=[45.5236, -122.6750], zoom_start=13)
+    m = folium.Map(location=[37.511905, 38.51532], zoom_start=13)
     
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -21,28 +21,37 @@ def CreateMap():
 
     m.get_root().html.add_child(folium.Element("""
         <script type="text/javascript">
-            document.addEventListener('DOMContentLoaded', function(){             
-                {map}.on("draw:create", function(e){
-                    console.log("on event");
-                    const geoJsonData = JSON.stringify(e.layer.toGeoJSON());
-                    console.log(geoJsonData);
-                                                                                        
-                    var textArea = parent.document.querySelector('#geojson_output textarea');
-                    textArea.value = geoJsonData;
-                    var event = new Event('input');
-                    textArea.dispatchEvent(event);
-                });    
-            
-                parent.document.getElementById('geojson_process').onclick = function(e) {
-                    var data = drawnItems.toGeoJSON();
-                    //var convertedData = 'text/json;charset=utf-8,'+ encodeURIComponent(JSON.stringify(data));
-                    var convertedData = JSON.stringify(data);                       
-                    
-                    var textArea = parent.document.querySelector('#geojson_output textarea');
-                    textArea.value = convertedData;
-                    var event = new Event('input');
-                    textArea.dispatchEvent(event);
-                };                                 
+            document.addEventListener('DOMContentLoaded', function() {
+                var idx = 0;
+                                               
+                const updateGeoJsonOutput = (geoJsonData) => {
+                    const textArea = parent.document.querySelector('#geojson_output textarea');
+  
+                    textArea.value = JSON.stringify(geoJsonData);
+                    textArea.dispatchEvent(new Event('input'));
+                };
+
+                {map}.on("draw:created", function(e) {           
+                    var layer = e.layer;
+                    feature = layer.feature = layer.feature || {}; 
+                        
+                    var title = prompt("Şekle bir isim giriniz:", "default");
+                    var value = prompt("Şekle bir değer giriniz: ", "");
+                    var id = idx++;
+
+                    feature.type = feature.type || "Feature";
+                    var props = feature.properties = feature.properties || {};
+                    props.Id = id;
+                    props.Title = title;
+                    props.Value = value;
+                    drawnItems.addLayer(layer);
+
+                    //updateGeoJsonOutput(e.layer.toGeoJSON());
+                });
+                                               
+                parent.document.getElementById('geojson_process').onclick = function() {
+                    updateGeoJsonOutput(drawnItems.toGeoJSON());
+                };
             });
         </script>
     """.replace('{map}', mapObjectInHTML)))
@@ -63,7 +72,7 @@ with gr.Blocks() as app:
     map_html = gr.HTML(CreateMap())
     
     # GeoJSON Textbox
-    geojson_output = gr.Textbox("", label="GeoJSON Output", lines=10, elem_id="geojson_output")
+    geojson_output = gr.Textbox("", label="GeoJSON Output", lines=6, elem_id="geojson_output")
     
     # JSON Pretty Textbox
     geojson_view = gr.JSON(visible=True)
