@@ -59,6 +59,8 @@ def WorkerInitFN(worker_id):
 
 def CollateFN(batch):
 	# TODO Eksik olan None değerler, tekrar burada verisetinden çekilebiliyor mu? Dene (Recursive gibi olabilir).
+	if batch is None:
+		return None, None
 	data, label = zip(*batch)
 	return torch.stack([d for d in data if d is not None]), torch.stack([l for l in label if l is not None])
 
@@ -486,9 +488,9 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		self.TrainIndexes = []
 		self.ValIndexes = []
 		self.TestIndexes = []
+		self.UsedIndexes = set()
 		self.SetIndexes()
 		self.SetSplitIndexes()
-		self.UsedIndexes = set()
 
 
 	def __len__(self):
@@ -505,6 +507,10 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		ConsoleLog(f"Sampler Process Id: {os.getpid()}", LogColorDefaults.Warning)
 		self.CheckStoppingConditions()
 		indexes = self.PrepareBatchIndexes()
+		if indexes is None:
+			time.sleep(0.3)           # Expire ve Used Indexleri karşılaştır.
+			return self.__next__()
+		
 		return indexes
 
 
@@ -567,6 +573,9 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 			self.RandomLimitCounter += 1
 
 			raise StopIteration
+		
+		elif (set(self.GetIndexes()) - self.DataSource.ExpiredScenes.ToSet()) - self.UsedIndexes:
+			...
 
 
 	def PrepareBatchIndexes(self):
@@ -589,7 +598,9 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 		expiredScenes = self.DataSource.ExpiredScenes.ToSet()
 		newIndices = (set(self.GetIndexes()) - expiredScenes) - self.UsedIndexes
 		newIndices = list(newIndices)
-
+		if len(newIndices)==0:
+			return
+		
 		# Indexlerden rastgele seçim yap
 		choices = np.random.choice(
 			newIndices,
@@ -597,17 +608,15 @@ class GeoSegmentationDatasetBatchSampler(Sampler):
 			replace=len(newIndices) < len(self.Config.BatchRepeatDataSegment)
 		)
 
-		# recovery = []
-		# for id_choice, seg_count in zip(choices, self.Config.BatchRepeatDataSegment):
-		# 	self.DataSource.AvailableInSource[id_choice]
+		# Kullanılan indisleri tüm indisler kullanılıncaya kadar kaydet
+		self.UsedIndexes.update(choices.tolist())
+
+		indexes = np.repeat(choices, self.Config.BatchRepeatDataSegment).tolist()
+		
 		if self.Config.Verbose:
 			print(f"Sampler: {choices} x {self.Config.BatchRepeatDataSegment}")
 		
-		indexes = np.repeat(choices, self.Config.BatchRepeatDataSegment).tolist()
-		
-		# Kullanılan indisleri tüm indisler kullanılıncaya kadar kaydet
-		self.UsedIndexes.update(indexes)
-		
+
 		return indexes
 
 
@@ -786,7 +795,7 @@ if "__main__" == __name__:
 	customBatchSampler = GeoSegmentationDatasetBatchSampler(dataset, data_split=[0.8, 0.1, 0.1], mode=BatchSamplerMode.Train)
 
 	#! DATALOADER
-	NUM_WORKERS = 1
+	NUM_WORKERS = 2
 	DATA_LOADER = DataLoader(
 		dataset,
 		batch_sampler=customBatchSampler,
@@ -794,25 +803,23 @@ if "__main__" == __name__:
 		persistent_workers=NUM_WORKERS>0,
 		pin_memory=True,
 		collate_fn=CollateFN,
-		multiprocessing_context=mp.get_context("spawn")
+		multiprocessing_context=mp.get_context("spawn") if NUM_WORKERS>0 else None
 	)
 	
 	ConsoleLog(f"Main Process Id: {os.getpid()}", LogColorDefaults.Warning, bold=True, underline=True, blink=True)
 	
+	#! SHOW RESULTS
 	for epoch in range(2):
 		print(f"\n------------------------{epoch}------------------------\n")
-		#! SHOW RESULTS
 		customBatchSampler.SetMode(BatchSamplerMode.Train)
 		
 		for i, (inputs, targets) in enumerate(DATA_LOADER):
-			# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-			print(f"Step: {i}", inputs.shape, targets.shape)
+			ConsoleLog(f"Step: {i} {inputs.shape} {targets.shape}", LogColorDefaults.Success)
 
 		print("\n===\n")	
 		customBatchSampler.SetMode(BatchSamplerMode.Test)
 		for i, (inputs, targets) in enumerate(DATA_LOADER):
-			# inputs, targets = inputs.to(DEVICE), targets.to(DEVICE)
-			print(f"Step: {i}", inputs.shape, targets.shape)
+			ConsoleLog(f"Step: {i} {inputs.shape} {targets.shape}", LogColorDefaults.Success)
 
 		print("\n------------------------------------------------\n")
 		time.sleep(3)
