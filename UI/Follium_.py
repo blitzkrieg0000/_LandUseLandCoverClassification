@@ -2,21 +2,68 @@ import folium
 import gradio as gr
 from folium import plugins
 
-
 def CreateMap():
-    m = folium.Map(location=[37.511905, 38.51532], zoom_start=13)
+    m = folium.Map(location=[37.511905, 38.51532], zoom_start=13, world_copy_jump=True, tiles=None)
     
+    folium.TileLayer(
+        tiles="http://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        attr="OpenStreetMap",
+        name="Open Street Map",
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="http://www.google.cn/maps/vt?lyrs=s@189&gl=cn&x={x}&y={y}&z={z}",
+        attr="Google",
+        name="Google Satellite",
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+        attr="EsriNatGeo",
+        name="Esri Nat Geo Map",
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        attr="EsriWorldStreetMap",
+        name="Esri World Street Map",
+    ).add_to(m)
+
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri",
-        name="World Topo Map"
+        name="Esri World Map",
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png",
+        attr="CartoDB",
+        name="CartoDB",
+    ).add_to(m)
+
+    folium.TileLayer(
+        tiles="https://tiles.stadiamaps.com/tiles/stamen_toner_background/{z}/{x}/{y}{r}.png",
+        attr="stadiamaps",
+        name="Stadia Maps",
+    ).add_to(m)
+
+    # Plugins
+    formatter = "function(num) {return L.Util.formatNum(num, 3) + ' &deg; ';};"
+    plugins.MousePosition(
+        position="bottomright",
+        separator=" | ",
+        empty_string="NaN",
+        lng_first=True,
+        num_digits=20,
+        prefix="Koordinatlar:",
+        lat_formatter=formatter,
+        lng_formatter=formatter,
     ).add_to(m)
 
     plugins.Geocoder().add_to(m)
-
-    # Çizim kontrolü ekle
     plugins.Draw(export=True, filename="drawing.geojson", position="topleft").add_to(m)
-    
+    folium.LayerControl(position="bottomleft",).add_to(m)
+
     mapObjectInHTML = m.get_name()
 
     m.get_root().html.add_child(folium.Element("""
