@@ -120,13 +120,14 @@ def CreateMap():
                            
                     drawnItems.addLayer(layer);
 
-                    //updateGeoJsonOutput(e.layer.toGeoJSON());
+                    updateGeoJsonOutput(drawnItems.toGeoJSON());
                 });
                 
                 {map}.on('draw:deleted', function(e) {
                     var layers = e.layers;
                     layers.eachLayer(function(layer) {
                         drawnItems.removeLayer(layer);
+                        updateGeoJsonOutput(drawnItems.toGeoJSON());
                     });
                 });
                                        
