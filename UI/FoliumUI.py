@@ -170,6 +170,7 @@ with gr.Blocks() as app:
     # Harita ve GeoJSON verisini bağlama
     @button.click(inputs=geojson_output, outputs=geojson_view, scroll_to_output=True)
     def VisualizeAsGeoJson(geojson_data):
+
         return geojson_data or {}
 
 
