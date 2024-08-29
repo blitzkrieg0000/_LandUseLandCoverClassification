@@ -89,16 +89,34 @@ def CreateMap():
                 {map}.on("draw:created", function(e) {           
                     var layer = e.layer;
                     feature = layer.feature = layer.feature || {}; 
-                        
-                    var title = prompt("Şekle bir isim giriniz:", "default");
-                    var value = prompt("Şekle bir değer giriniz: ", "");
-                    var id = idx++;
+                    
+                    var title, value;
+                    do {
+                        title = prompt("Şekle bir isim giriniz:", "");
+                        if (title === null) {
+                            drawnItems.removeLayer(layer);
+                            return;
+                        }
+                    } while (!title);
 
+                    do {
+                        value = prompt("Şekle bir değer giriniz: ", "");
+                        if (value === null) {
+                            drawnItems.removeLayer(layer);
+                            return;
+                        }
+                    } while (!value);              
+
+                    var id = idx++;
                     feature.type = feature.type || "Feature";
                     var props = feature.properties = feature.properties || {};
                     props.Id = id;
                     props.Title = title;
                     props.Value = value;
+                                               
+                    // Add Tooltip
+                    layer.bindTooltip(`Şekil:${id+1} - İsim:${title} - Değer:${value}`, {permanent: false, direction: "center", className: "label-tooltip"}).openTooltip();
+                           
                     drawnItems.addLayer(layer);
 
                     //updateGeoJsonOutput(e.layer.toGeoJSON());
@@ -121,25 +139,35 @@ def process_geojson(geojson_data):
 
 # Gradio uygulamasını oluşturma
 with gr.Blocks() as app:
-    gr.Markdown("## Çalışmak İstediğiniz Bölgeyi Çiziniz")
-    
-    # Haritayı görüntüleme
-    map_html = gr.HTML(CreateMap())
-    
-    # GeoJSON Textbox
-    geojson_output = gr.Textbox("", label="GeoJSON Output", lines=6, elem_id="geojson_output")
-    
-    # JSON Pretty Textbox
-    geojson_view = gr.JSON(visible=True)
 
-    # Process Button
-    button = gr.Button("Process", elem_id="geojson_process")
+    with gr.Row():
+        with gr.Column(scale=1):
+            gr.Markdown("## Çalışmak İstediğiniz Bölgeyi Çiziniz")
+
+        with gr.Column(scale=1):
+            button = gr.Button("Process", elem_id="geojson_process")
+
+        with gr.Column(scale=1):
+            uploadGeoJsonButton = gr.Button("GeoJson Yükle", elem_id="geojson_upload")
+    
+
+    # Haritayı görüntüleme
+    map_html = gr.HTML(CreateMap(), elem_id="map_container")
+
+
+    # GeoJSON Textbox
+    geojson_output = gr.Textbox("", placeholder="Çizilen Şekillerin GeoJSON formatı burada görünür.", label="Raw GeoJSON: ", lines=6, elem_id="geojson_output", interactive=False)
+    
+    # JSON Prettier GeoJSON Textbox
+    geojson_view = gr.JSON(label="PrettierGeoJSON: ", visible=True)
+
 
     # Harita ve GeoJSON verisini bağlama
-    @button.click(inputs=geojson_output, outputs=geojson_view)
+    @button.click(inputs=geojson_output, outputs=geojson_view, scroll_to_output=True)
     def VisualizeAsGeoJson(geojson_data):
         return geojson_data or {}
-    
 
 
-app.launch()
+app.queue(max_size=10)
+
+app.launch() # auth=("admin", "admin")
