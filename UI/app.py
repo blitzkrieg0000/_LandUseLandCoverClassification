@@ -3,43 +3,43 @@ import gradio as gr
 from folium import plugins
 
 def CreateMap():
-    fmap = folium.Map(location=[37.511905, 38.51532], zoom_start=6, world_copy_jump=True, tiles=None)
+    m = folium.Map(location=[37.511905, 38.51532], zoom_start=6, world_copy_jump=True, tiles=None)
     
     folium.TileLayer(
         tiles="http://tile.openstreetmap.org/{z}/{x}/{y}.png",
         attr="OpenStreetMap",
         name="Open Street Map",
-    ).add_to(fmap)
+    ).add_to(m)
 
     folium.TileLayer(
         tiles="http://www.google.cn/maps/vt?lyrs=s@189&gl=cn&x={x}&y={y}&z={z}",
         attr="Google",
         name="Google Satellite",
-    ).add_to(fmap)
+    ).add_to(m)
 
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
         attr="EsriNatGeo",
         name="Esri Nat Geo Map",
-    ).add_to(fmap)
+    ).add_to(m)
 
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
         attr="EsriWorldStreetMap",
         name="Esri World Street Map",
-    ).add_to(fmap)
+    ).add_to(m)
 
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri",
         name="Esri World Map",
-    ).add_to(fmap)
+    ).add_to(m)
 
     folium.TileLayer(
         tiles="https://cartodb-basemaps-a.global.ssl.fastly.net/light_all/{z}/{x}/{y}.png",
         attr="CartoDB",
         name="CartoDB",
-    ).add_to(fmap)
+    ).add_to(m)
 
     # Plugins
     formatter = "function(num) {return L.Util.formatNum(num, 3) + ' &deg; ';};"
@@ -52,43 +52,37 @@ def CreateMap():
         prefix="Koordinatlar:",
         lat_formatter=formatter,
         lng_formatter=formatter,
-    ).add_to(fmap)
+    ).add_to(m)
 
-    plugins.Geocoder().add_to(fmap)
-    plugins.Draw(export=True, filename="drawing.geojson", position="topleft", show_geometry_on_click=False).add_to(fmap)
-    folium.LayerControl(position="bottomleft",).add_to(fmap)
+    plugins.Geocoder().add_to(m)
+    plugins.Draw(export=True, filename="drawing.geojson", position="topleft", show_geometry_on_click=False).add_to(m)
+    folium.LayerControl(position="bottomleft",).add_to(m)
     plugins.Fullscreen(
         position="topright",
         title="Expand me",
         title_cancel="Exit me",
         force_separate_button=True,
-    ).add_to(fmap)
+    ).add_to(m)
 
-    
+
     # Drawing Control
-    mapObjectInHTML = fmap.get_name()
-    root = fmap.get_root()
-    root.html.add_child(folium.Element("""
+    mapObjectInHTML = m.get_name()
+
+    m.get_root().html.add_child(folium.Element("""
         <script type="text/javascript">
             document.addEventListener('DOMContentLoaded', function() {
                 var idx = 0;
-                var drawnItems = new L.FeatureGroup();
-                {map}.addLayer(drawnItems);
-                                       
 
                 const updateGeoJsonOutput = (geoJsonData) => {
                     const textArea = parent.document.querySelector('#geojson_output textarea');
                     textArea.value = JSON.stringify(geoJsonData);
                     textArea.dispatchEvent(new Event('input'));
                 };
-                                       
-                parent.document.getElementById('geojson_process').onclick = function() {
-                    updateGeoJsonOutput(drawnItems.toGeoJSON());
-                };
-                                       
+
                 {map}.on("draw:created", function(e) {           
                     var layer = e.layer;
                     drawnItems.addLayer(layer);
+                    console.log(layer);
                     feature = layer.feature = layer.feature || {}; 
                     
                     var title, value;
@@ -107,7 +101,7 @@ def CreateMap():
                             return;
                         }
                     } while (!value);              
-
+                    console.log("asdasdasdas");
                     var id = idx++;
                     feature.type = feature.type || "Feature";
                     var props = feature.properties = feature.properties || {};
@@ -122,19 +116,15 @@ def CreateMap():
 
                     //updateGeoJsonOutput(e.layer.toGeoJSON());
                 });
-                
-                {map}.on('draw:deleted', function(e) {
-                    var layers = e.layers;
-                    layers.eachLayer(function(layer) {
-                        drawnItems.removeLayer(layer);
-                    });
-                });
-                                       
+                                               
+                parent.document.getElementById('geojson_process').onclick = function() {
+                    updateGeoJsonOutput(drawnItems.toGeoJSON());
+                };
             });
         </script>
     """.replace('{map}', mapObjectInHTML)))
 
-    return fmap._repr_html_()
+    return m._repr_html_()
 
 
 # GeoJSON verisini işleme fonksiyonu
