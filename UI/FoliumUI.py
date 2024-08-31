@@ -176,5 +176,4 @@ with gr.Blocks() as app:
 
 
 app.queue(max_size=10)
-
 app.launch(share_server_protocol="https") # auth=("admin", "admin")
