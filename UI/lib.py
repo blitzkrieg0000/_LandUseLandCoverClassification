@@ -5,6 +5,8 @@ import gradio as gr
 from matplotlib import pyplot as plt
 import requests
 
+# geemap.update_package()
+
 # Connect GEE API
 GEE_CREDENTIALS_FILE = "./data/gee/geospatial_api_key.json"
 if not os.path.exists(GEE_CREDENTIALS_FILE):
