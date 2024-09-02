@@ -1,11 +1,15 @@
 # import os
 # os.system("pip install folium")
 # os.system("pip install gradio")
+# os.system("pip install geemap")
+# os.system("pip install earthengine-api --upgrade")
 
+import json
 import folium
 import gradio as gr
 from folium import plugins
 
+from lib import RequestFunction
 
 
 def CreateMap():
@@ -139,9 +143,17 @@ def CreateMap():
                                        
             });
         </script>
-    """.replace('{map}', mapObjectInHTML)))
+    """.replace("{map}", mapObjectInHTML)))
 
     return fmap._repr_html_()
+
+
+def CreateDatasetMap(geojson_data):
+    geojson = json.loads(geojson_data)
+    coodinates = geojson.get("features")[0].get("geometry").get("coordinates")[0]
+    print(coodinates)
+    return RequestFunction(coodinates)
+
 
 
 # GeoJSON verisini işleme fonksiyonu
@@ -157,7 +169,10 @@ with gr.Blocks() as app:
             gr.Markdown("## Çalışmak İstediğiniz Bölgeyi Çiziniz")
 
         with gr.Column(scale=1):
-            button = gr.Button("Process", elem_id="geojson_process")
+            prepareDatasetButton = gr.Button("Veri Çek", elem_id="prepare_dataset")
+
+        with gr.Column(scale=1):
+            geoJsonProcessButton = gr.Button("Process", elem_id="geojson_process")
 
         with gr.Column(scale=1):
             uploadGeoJsonButton = gr.Button("GeoJson Yükle", elem_id="geojson_upload")
@@ -165,6 +180,9 @@ with gr.Blocks() as app:
 
     # Haritayı görüntüleme
     map_html = gr.HTML(CreateMap(), elem_id="map_container")
+
+    # Dataset görüntüleme
+    dataset_map_html = gr.HTML(elem_id="dataset_map_container")
 
     # GeoJSON Textbox
     geojson_output = gr.Textbox("", placeholder="Çizilen Şekillerin GeoJSON formatı burada görünür.", label="Raw GeoJSON: ", lines=6, elem_id="geojson_output", interactive=False)
@@ -174,11 +192,15 @@ with gr.Blocks() as app:
 
 
     # Harita ve GeoJSON verisini bağlama
-    @button.click(inputs=geojson_output, outputs=geojson_view, scroll_to_output=True)
+    @geoJsonProcessButton.click(inputs=geojson_output, outputs=geojson_view, scroll_to_output=True)
     def VisualizeAsGeoJson(geojson_data):
-
         return geojson_data or {}
 
 
+    @prepareDatasetButton.click(inputs=geojson_output, outputs=dataset_map_html)
+    def PrepareDataset(geojson_data):
+        return gr.HTML(CreateDatasetMap(geojson_data), elem_id="dataset_map_container")
+
+
 app.queue(max_size=10)
-app.launch(share_server_protocol="https") # auth=("admin", "admin")
+app.launch(share_server_protocol="https")

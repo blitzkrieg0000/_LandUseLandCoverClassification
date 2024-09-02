@@ -153,6 +153,8 @@ def RequestFunction(roi):
     if roi is None:
         return None
 
+    roi = ee.Geometry.Polygon(roi)
+
     ##! --------------- Dataset --------------- !##
     # Gather S2 Data
     S2Collection = (
