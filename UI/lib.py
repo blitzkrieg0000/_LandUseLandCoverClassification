@@ -1,3 +1,4 @@
+import os
 import ee
 import geemap.foliumap as geemap
 import gradio as gr
@@ -6,13 +7,17 @@ import requests
 
 # Connect GEE API
 GEE_CREDENTIALS_FILE = "./data/gee/geospatial_api_key.json"
-credentials = ee.ServiceAccountCredentials(None, GEE_CREDENTIALS_FILE)
-ee.Initialize(credentials)
+if not os.path.exists(GEE_CREDENTIALS_FILE):
+    credentials = ee.ServiceAccountCredentials(None, key_data=os.getenv("geospatial_api_key"))
+else:
+    credentials = ee.ServiceAccountCredentials(None, GEE_CREDENTIALS_FILE)
 
+ee.Initialize(credentials)
 
 
 ##! --------------- PARAMS --------------- !##
 ROI = ee.Geometry.Polygon([[37.279358,36.412414],[37.279358, 39.925815],[42.393494, 39.925815],[42.393494, 36.412414],[37.279358, 36.412414]])
+
 CLASSES = {
     "names" : ["Water", "Trees", "Flooded Vegetation", "Crops", "Built Area", "Bare Ground", "Snow/Ice", "Clouds", "Rangeland"],
     "colors" : ["1a5bab", "358221", "87d19e", "ffdb5c", "ed022a", "ede9e4", "f2faff", "c8c8c8", "c6ad8d"]
@@ -39,9 +44,9 @@ S2_VIS_PARAMS = {
 
 
 ##! --------------- Functions --------------- !##
-def VisualizeMatplot(image):
+def VisualizeMatplot(image, roi):
     """Görüntüyü numpy array olarak alma"""
-    image = geemap.ee_to_numpy(image, region=ROI, bands=["B4", "B3", "B2"])
+    image = geemap.ee_to_numpy(image, region=roi, bands=["B4", "B3", "B2"])
 
     plt.figure(figsize=(10, 10))
     plt.imshow(image)
@@ -79,10 +84,10 @@ def ReColormap(image, old_colors: list, new_colors: list):
     return image.remap(old_colors, new_colors)
 
 
-def CalculateRasterOverlapByROI(image):
-    intersection = image.clip(ROI).reduceRegion(
+def CalculateRasterOverlapByROI(image, roi: ee.Geometry):
+    intersection = image.clip(roi).reduceRegion(
         reducer=ee.Reducer.count(),
-        geometry=ROI,
+        geometry=roi,
         scale=10,
         maxPixels=1e9
     )
@@ -106,14 +111,14 @@ def GetS2SRCloudCollection(s2_collection: ee.ImageCollection, roi: ee.Geometry, 
 
 
 # Her bir görüntü için alanı hesapla ve NoData piksellerini dışla
-def add_area_attribute(image):
+def add_area_attribute(image, roi):
     # Belirli geometri içindeki piksel alanlarını hesapla
     pixel_area = image.select(0).multiply(ee.Image.pixelArea())
     
     # Hesaplanan alanı, istenen geometri içinde özetle
     region_area = pixel_area.reduceRegion(
         reducer=ee.Reducer.sum(),
-        geometry=ROI,
+        geometry=roi,
         scale=10,         # Sentinel-2 için 10 metre çözünürlük
         maxPixels=1e13
     ).get("B1")  # Burada B1 rastgele bir banttır. İlgili bantlardan biri kullanılabilir
@@ -122,12 +127,12 @@ def add_area_attribute(image):
     return image.set("REGION_AREA", region_area)
 
 
-def CalculateIntersectionArea(image):
+def CalculateIntersectionArea(image, roi):
     # Görüntüyü maskele ve konveks kaplamasını hesapla
     convex_hull = image.geometry().convexHull()
     
     # Konveks kaplamanın region ile kesişimini hesapla
-    intersection = convex_hull.intersection(ROI)
+    intersection = convex_hull.intersection(roi)
     
     # Kesişimin alanını hesapla
     intersection_area = intersection.area()
@@ -144,33 +149,15 @@ def FilterBestAreaOfMGRSJoin(image):
 
 
 
-def DownloadImage(image: ee.Image):
-    tiles = image.geometry().coveringGrid(ee.Projection("EPSG:4326"), 12000)
+def RequestFunction(roi):
+    if roi is None:
+        return None
 
-    for i, tile in enumerate(tiles.getInfo()["geometries"]):
-        # Her bir tile'ı indir
-        url = image.getDownloadURL({
-            "scale": 10,  # Çözünürlük
-            "region": tile["coordinates"],
-            "format": "GeoTIFF"
-        })
-        
-        # Dosyayı indir ve kaydet
-        response = requests.get(url)
-        tiff_filename = f"data/download/tile_{i}.tif"
-        with open(tiff_filename, "wb") as file:
-            file.write(response.content)
-        
-        print(f"Tile {i} saved as {tiff_filename}")
-
-
-
-def Main():
     ##! --------------- Dataset --------------- !##
     # Gather S2 Data
     S2Collection = (
         ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
-            .filterBounds(ROI)
+            .filterBounds(roi)
             .filterDate(S2_START_DATE, S2_END_DATE)
             .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", CLOUDY_PIXEL_PERCENTAGE))
             .sort("CLOUDY_PIXEL_PERCENTAGE", ascending=True)
@@ -179,7 +166,7 @@ def Main():
     # Gather Mask Data
     esriLULCCollection = ee.ImageCollection("projects/sat-io/open-datasets/landcover/ESRI_Global-LULC_10m_TS").filterDate(S2_LULC_START_DATE, S2_LULC_END_DATE)
     esriLULCCollection = (
-        ee.ImageCollection(esriLULCCollection.mosaic().clip(ROI))
+        ee.ImageCollection(esriLULCCollection.mosaic().clip(roi))
         .map(lambda img: ReColormap(img, [1, 2, 4, 5, 7, 8, 9, 10, 11], [1, 2, 3, 4, 5, 6, 7, 8, 9]))
     )
 
@@ -192,7 +179,7 @@ def Main():
     S2Collection = S2Collection.map(ApplyBitwiseS2CloudMask)
 
     # Area Calculation
-    S2Collection = S2Collection.map(CalculateIntersectionArea).sort("INTERSECTION_AREA", False)
+    S2Collection = S2Collection.map(lambda image: CalculateIntersectionArea(image, roi)).sort("INTERSECTION_AREA", False)
     
     # MGRS_TILE Match
     joinCol = ee.Join.saveAll("mgrs_tile_match").apply(
@@ -202,7 +189,7 @@ def Main():
     )
 
     bestCollection = ee.ImageCollection(joinCol.map(FilterBestAreaOfMGRSJoin))
-    s2Image = bestCollection.mosaic().clip(ROI)
+    s2Image = bestCollection.mosaic().clip(roi)
     # print(bestCollection.aggregate_array("INTERSECTION_AREA").getInfo())
 
 
@@ -212,21 +199,26 @@ def Main():
 
     ##! --------------- Create FoliumGee Map --------------- !##
     map = geemap.Map(center=[37.279358, 36.412414], zoom=10)
-    map.add_layer(ROI, {"color": "black"}, "Pilot Bölge")
+    map.add_layer(roi, {"color": "black"}, "Pilot Bölge")
     map.add_layer(s2Image, S2_VIS_PARAMS, "RGB")
-    map.add_layer(ROI, {"color": "black"}, "Pilot Bölge")
+    map.add_layer(roi, {"color": "black"}, "Pilot Bölge")
     map.add_layer(esriLULCImage, {"min": 1, "max": 9, "palette": CLASSES["colors"]}, "LULC")
 
-    DownloadImage(esriLULCImage)
 
-
-    ##! --------------- Gradio --------------- !##
-    # with gr.Blocks() as app:
-    #     web = gr.HTML(map.to_gradio(), label="Map")
-
-    # app.launch()
+    return map.to_gradio()
+    # url = esriLULCImage.getDownloadURL({
+    #     "scale": 10,  # Çözünürlük
+    #     "region": ROI,
+    #     "format": "GeoTIFF"
+    # })
 
 
 
 if "__main__" == __name__:
-    Main()
+
+    html = RequestFunction(ROI)
+
+    with gr.Blocks() as app:
+        web = gr.HTML(html, label="Map")
+
+    app.launch()

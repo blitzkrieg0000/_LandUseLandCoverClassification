@@ -1,6 +1,12 @@
+# import os
+# os.system("pip install folium")
+# os.system("pip install gradio")
+
 import folium
 import gradio as gr
 from folium import plugins
+
+
 
 def CreateMap():
     fmap = folium.Map(location=[37.511905, 38.51532], zoom_start=6, world_copy_jump=True, tiles=None)
@@ -159,7 +165,6 @@ with gr.Blocks() as app:
 
     # Haritayı görüntüleme
     map_html = gr.HTML(CreateMap(), elem_id="map_container")
-
 
     # GeoJSON Textbox
     geojson_output = gr.Textbox("", placeholder="Çizilen Şekillerin GeoJSON formatı burada görünür.", label="Raw GeoJSON: ", lines=6, elem_id="geojson_output", interactive=False)
