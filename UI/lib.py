@@ -8,7 +8,7 @@ import requests
 # geemap.update_package()
 
 # Connect GEE API
-GEE_CREDENTIALS_FILE = "./data/gee/geospatial_api_key.json"
+GEE_CREDENTIALS_FILE = "../data/gee/geospatial_api_key.json"
 if not os.path.exists(GEE_CREDENTIALS_FILE):
     credentials = ee.ServiceAccountCredentials(None, key_data=os.getenv("geospatial_api_key"))
 else:
@@ -202,19 +202,12 @@ def RequestFunction(roi):
 
 
     ##! --------------- Create FoliumGee Map --------------- !##
-    map = geemap.Map(center=[37.279358, 36.412414], zoom=10)
+    map = geemap.Map(center=[37.279358, 36.412414], zoom=10, add_google_map=False)
     map.add_layer(roi, {"color": "black"}, "Pilot Bölge")
     map.add_layer(s2Image, S2_VIS_PARAMS, "RGB")
-    map.add_layer(roi, {"color": "black"}, "Pilot Bölge")
     map.add_layer(esriLULCImage, {"min": 1, "max": 9, "palette": CLASSES["colors"]}, "LULC")
 
-
-    return map.to_gradio()
-    # url = esriLULCImage.getDownloadURL({
-    #     "scale": 10,  # Çözünürlük
-    #     "region": ROI,
-    #     "format": "GeoTIFF"
-    # })
+    return map
 
 
 

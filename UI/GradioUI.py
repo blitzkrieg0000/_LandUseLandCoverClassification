@@ -151,14 +151,8 @@ def CreateMap():
 def CreateDatasetMap(geojson_data):
     geojson = json.loads(geojson_data)
     coodinates = geojson.get("features")[0].get("geometry").get("coordinates")[0]
-    print(coodinates)
     return RequestFunction(coodinates)
 
-
-
-# GeoJSON verisini işleme fonksiyonu
-def process_geojson(geojson_data):
-    return geojson_data
 
 
 # Gradio uygulamasını oluşturma
@@ -172,7 +166,7 @@ with gr.Blocks() as app:
             prepareDatasetButton = gr.Button("Veri Çek", elem_id="prepare_dataset")
 
         with gr.Column(scale=1):
-            geoJsonProcessButton = gr.Button("Process", elem_id="geojson_process")
+            geoJsonProcessButton = gr.Button("GeoJson Al", elem_id="geojson_process")
 
         with gr.Column(scale=1):
             uploadGeoJsonButton = gr.Button("GeoJson Yükle", elem_id="geojson_upload")
@@ -197,9 +191,10 @@ with gr.Blocks() as app:
         return geojson_data or {}
 
 
-    @prepareDatasetButton.click(inputs=geojson_output, outputs=dataset_map_html)
+    @prepareDatasetButton.click(inputs=geojson_output, outputs=dataset_map_html, scroll_to_output=True)
     def PrepareDataset(geojson_data):
-        return gr.HTML(CreateDatasetMap(geojson_data), elem_id="dataset_map_container")
+        return CreateDatasetMap(geojson_data).to_gradio()
+
 
 
 app.queue(max_size=10)
