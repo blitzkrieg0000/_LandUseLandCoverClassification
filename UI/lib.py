@@ -8,7 +8,7 @@ import requests
 # geemap.update_package()
 
 # Connect GEE API
-GEE_CREDENTIALS_FILE = "../data/gee/geospatial_api_key.json"
+GEE_CREDENTIALS_FILE = "./data/gee/geospatial_api_key.json"
 if not os.path.exists(GEE_CREDENTIALS_FILE):
     credentials = ee.ServiceAccountCredentials(None, key_data=os.getenv("geospatial_api_key"))
 else:

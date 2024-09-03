@@ -145,14 +145,18 @@ def CreateMap():
         </script>
     """.replace("{map}", mapObjectInHTML)))
 
-    return fmap._repr_html_()
+    return fmap
 
 
 def CreateDatasetMap(geojson_data):
     geojson = json.loads(geojson_data)
     coodinates = geojson.get("features")[0].get("geometry").get("coordinates")[0]
-    return RequestFunction(coodinates)
+    data = RequestFunction(coodinates)
 
+    return data
+
+
+basemap = CreateMap()
 
 
 # Gradio uygulamasını oluşturma
@@ -173,7 +177,7 @@ with gr.Blocks() as app:
     
 
     # Haritayı görüntüleme
-    map_html = gr.HTML(CreateMap(), elem_id="map_container")
+    map_html = gr.HTML(basemap._repr_html_(), elem_id="map_container")
 
     # Dataset görüntüleme
     dataset_map_html = gr.HTML(elem_id="dataset_map_container")
@@ -193,7 +197,7 @@ with gr.Blocks() as app:
 
     @prepareDatasetButton.click(inputs=geojson_output, outputs=dataset_map_html, scroll_to_output=True)
     def PrepareDataset(geojson_data):
-        return CreateDatasetMap(geojson_data).to_gradio()
+        return CreateDatasetMap(geojson_data)
 
 
 
