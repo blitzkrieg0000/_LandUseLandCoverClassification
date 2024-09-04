@@ -10,7 +10,7 @@ import gradio as gr
 from folium import plugins
 
 from lib import RequestFunction
-
+import html
 
 def CreateMap():
     fmap = folium.Map(location=[37.511905, 38.51532], zoom_start=6, world_copy_jump=True, tiles=None)
@@ -152,8 +152,20 @@ def CreateDatasetMap(geojson_data):
     geojson = json.loads(geojson_data)
     coodinates = geojson.get("features")[0].get("geometry").get("coordinates")[0]
     data = RequestFunction(coodinates)
+    obj = data.to_html()
 
-    return data
+    obj = html.escape(obj)
+
+    _html = f"""<iframe style="width: 100%; height: 480px" name="result" allow="midi; geolocation; microphone; camera; 
+    display-capture; encrypted-media;" sandbox="allow-modals allow-forms 
+    allow-scripts allow-same-origin allow-popups 
+    allow-top-navigation-by-user-activation allow-downloads" allowfullscreen="" 
+    allowpaymentrequest="" frameborder="0" srcdoc='{obj}'></iframe>"""
+
+    with open("dataset_map.html", "w") as f:
+        f.write(_html)
+
+    return _html
 
 
 basemap = CreateMap()

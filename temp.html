@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8" />
+
+    <script>
+        L_NO_TOUCH = false;
+        L_DISABLE_3D = false;
+    </script>
+
+    <style>
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+    <style>
+        #map {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            right: 0;
+            left: 0;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-1.12.4.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.3/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.2/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://netdna.bootstrapcdn.com/bootstrap/3.0.0/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.2.0/css/all.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Leaflet.awesome-markers/2.0.2/leaflet.awesome-markers.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/python-visualization/folium/folium/templates/leaflet.awesome.rotate.min.css" />
+
+    <meta name="viewport" content="width=device-width,
+                initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <style>
+        #map_ffac25c8d3317d25a01304a8811788a3 {
+            position: relative;
+            width: 100.0%;
+            height: 100.0%;
+            left: 0.0%;
+            top: 0.0%;
+        }
+
+        .leaflet-container {
+            font-size: 1rem;
+        }
+    </style>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.fullscreen/1.4.2/Control.FullScreen.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.fullscreen/1.4.2/Control.FullScreen.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.2/leaflet.draw.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.2/leaflet.draw.css" />
+    <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+</head>
+
+<body>
+
+
+    <div class="folium-map" id="map_ffac25c8d3317d25a01304a8811788a3"></div>
+
+</body>
+<script>
+
+
+    var map_ffac25c8d3317d25a01304a8811788a3 = L.map(
+        "map_ffac25c8d3317d25a01304a8811788a3",
+        {
+            center: [37.279358, 36.412414],
+            crs: L.CRS.EPSG3857,
+            zoom: 10,
+            zoomControl: true,
+            preferCanvas: false,
+            addGoogleMap: false,
+            eeInitialize: true,
+            pluginLatlngpopup: false,
+            pluginFullscreen: true,
+            pluginDraw: true,
+            DrawExport: false,
+            pluginMinimap: false,
+            locateControl: false,
+            searchControl: true,
+            layersControl: true,
+        }
+    );
+
+
+
+
+
+    var tile_layer_1b92f37cc8214f9f16ed191bebd58694 = L.tileLayer(
+        "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    ).addTo(map_ffac25c8d3317d25a01304a8811788a3);
+
+
+    L.control.fullscreen(
+        { "forceSeparateButton": false, "position": "topleft", "title": "Full Screen", "titleCancel": "Exit Full Screen" }
+    ).addTo(map_ffac25c8d3317d25a01304a8811788a3);
+
+    var options = {
+        position: "topleft",
+        draw: {},
+        edit: {},
+    }
+    // FeatureGroup is to store editable layers.
+    var drawnItems = new L.featureGroup().addTo(
+        map_ffac25c8d3317d25a01304a8811788a3
+    );
+    options.edit.featureGroup = drawnItems;
+    var draw_control_387bd9e637d3af032b6ed6f6e0736b80 = new L.Control.Draw(
+        options
+    ).addTo(map_ffac25c8d3317d25a01304a8811788a3);
+
+    map_ffac25c8d3317d25a01304a8811788a3.fitBounds(
+        [[37.279358, 36.412414], [37.279358, 36.412414]],
+        { "maxZoom": 10 }
+    );
+
+
+    var tile_layer_bfda02b2c502423d09ea24bf867ca5f9 = L.tileLayer(
+        "https://earthengine.googleapis.com/v1/projects/earthengine-legacy/maps/f1eb4513a89df7e821b38af51b4319ed-f2d3e7bc7e320e3769a612c7a4f9147b/tiles/{z}/{x}/{y}",
+    ).addTo(map_ffac25c8d3317d25a01304a8811788a3);
+
+
+    var tile_layer_3fb53a232b595eef87935bc47fa88bcf = L.tileLayer(
+        "https://earthengine.googleapis.com/v1/projects/earthengine-legacy/maps/92ac39dd1168ab31977493797242d1fe-e68a8d91b222c82b478776ac24829cf9/tiles/{z}/{x}/{y}",
+    ).addTo(map_ffac25c8d3317d25a01304a8811788a3);
+
+
+    var tile_layer_db14d739cbe96414f001216c726cd215 = L.tileLayer(
+        "https://earthengine.googleapis.com/v1/projects/earthengine-legacy/maps/a203876deebcb57879ad84ec57da57fa-64c20a036b3caf66950a379e8355439d/tiles/{z}/{x}/{y}",
+    ).addTo(map_ffac25c8d3317d25a01304a8811788a3);
+
+
+    var layer_control_08cc824e0e2ae7798728c6fdc3e5a7d4 = {
+        base_layers: {
+            "openstreetmap": tile_layer_1b92f37cc8214f9f16ed191bebd58694,
+        },
+        overlays: {
+            "Pilot B\u00f6lge": tile_layer_bfda02b2c502423d09ea24bf867ca5f9,
+            "RGB": tile_layer_3fb53a232b595eef87935bc47fa88bcf,
+            "LULC": tile_layer_db14d739cbe96414f001216c726cd215,
+        },
+    };
+    L.control.layers(
+        layer_control_08cc824e0e2ae7798728c6fdc3e5a7d4.base_layers,
+        layer_control_08cc824e0e2ae7798728c6fdc3e5a7d4.overlays,
+        { "autoZIndex": true, "collapsed": true, "position": "topright" }
+    ).addTo(map_ffac25c8d3317d25a01304a8811788a3);
+
+</script>
+
+</html>
