@@ -4,13 +4,15 @@
 # os.system("pip install geemap")
 # os.system("pip install earthengine-api --upgrade")
 
+import html
 import json
+
 import folium
 import gradio as gr
 from folium import plugins
 
-from lib import RequestFunction
-import html
+from UI.Infrastructure.Service.GEE.lib import RequestFunction
+
 
 def CreateMap():
     fmap = folium.Map(location=[37.511905, 38.51532], zoom_start=6, world_copy_jump=True, tiles=None)
@@ -213,5 +215,6 @@ with gr.Blocks() as app:
 
 
 
-app.queue(max_size=10)
-app.launch(share_server_protocol="https")
+if "__main__" == __name__:
+    app.queue(max_size=10)
+    app.launch(share_server_protocol="https")

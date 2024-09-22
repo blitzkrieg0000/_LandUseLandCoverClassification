@@ -1,3 +1,7 @@
+# import os
+# os.system("pip install dash")
+# os.system("pip install dash-leaflet")
+
 import dash
 from dash import dcc, html, Input, Output
 import dash_leaflet as dl

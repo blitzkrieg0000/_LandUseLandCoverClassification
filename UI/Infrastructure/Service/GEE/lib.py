@@ -43,8 +43,6 @@ S2_VIS_PARAMS = {
 }
 
 
-
-
 ##! --------------- Functions --------------- !##
 def VisualizeMatplot(image, roi):
     """Görüntüyü numpy array olarak alma"""
