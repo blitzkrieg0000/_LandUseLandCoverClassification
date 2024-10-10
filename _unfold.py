@@ -20,3 +20,12 @@ print(unfolded.shape)
 
 
 
+#%%
+import torch
+import numpy as np
+
+torch.functional
+vector = torch.tensor([10.0, 9.0, 12.0])
+probabilities = torch.nn.Softmax(dim=-1)(vector)
+print("Probability Distribution is:")
+print(probabilities)

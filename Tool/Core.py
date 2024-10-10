@@ -1,5 +1,6 @@
 from collections import deque
 from enum import Enum
+import os
 import random
 import sys
 import time
@@ -44,6 +45,9 @@ class EarlyStopping():
         torch.save(model.state_dict(), self.checkpoint_save_path)
         self.val_loss_min = val_loss
 
+
+def RegisterModulePath(file: __file__):
+    sys.path.append(file)
 
 
 class LimitedCache():
@@ -144,3 +148,5 @@ def ConsoleLog(message, color: LogColorDefaults=LogColorDefaults.Info, bold: boo
 	attrs = [att for att, cond in zip(atts, conds) if cond]
 	msg = colored(message, color.value, attrs=attrs)
 	print(msg)
+
+

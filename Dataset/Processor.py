@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from Dataset.Base import BaseDatasetProcessor
-from Dataset.FileReader import GeoTIFFReader
+from Dataset.RasterLoader.FileReader import GeoTIFFReader
 from Model.Base import ModelMeta
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
