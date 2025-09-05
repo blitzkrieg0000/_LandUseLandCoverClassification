@@ -78,12 +78,4 @@ This is essential in **environmental monitoring, urban planning, agriculture, an
 
 ### 📦 Weights
 - Pretrained weights for DeepLabv3 and U-Net models  
-- Organized storage for reproducibility  
-
----
-
-## 🚀 Quick Start
-
-```bash
-# Install dependencies
-pip install -r requirements.txt
+- Organized storage for reproducibility
