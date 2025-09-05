@@ -15,12 +15,15 @@ This is essential in **environmental monitoring, urban planning, agriculture, an
 ![Classes](asset/img/SS01.png)
 
 **LULC Classes**
+
 ![](asset/img/class.png)
 
 **Training Approach**
+
 ![](asset/img/training_seperation.png)
 
 **Inference**
+
 ![](asset/img/UNET6.png)
 ![](asset/img/UNET9.png)
 
