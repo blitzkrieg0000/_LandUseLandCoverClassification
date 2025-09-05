@@ -11,6 +11,22 @@ It integrates dataset preprocessing, training pipelines, ONNX export, and multip
 Land Use / Land Cover (LULC) mapping is the process of **classifying and analyzing the Earth's surface** based on satellite or aerial imagery.  
 This is essential in **environmental monitoring, urban planning, agriculture, and climate studies**.
 
+**Land Use Land Cover Classification Map**
+![Classes](asset/img/SS01.png)
+
+**LULC Classes**
+![](asset/img/class.png)
+
+**Training Approach**
+![](asset/img/training_seperation.png)
+
+**Inference**
+![](asset/img/UNET6.png)
+![](asset/img/UNET9.png)
+
+---
+
+
 ### 🔹 Key Concepts
 - **Land Cover**: Physical material on the surface (e.g., water, forest, urban areas, crops).  
 - **Land Use**: Human activities or purposes associated with a land cover type (e.g., residential, industrial, agricultural).  
